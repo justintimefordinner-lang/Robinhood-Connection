@@ -250,14 +250,12 @@ def get_price_history(rh, symbol: str, days: int = 400) -> list[dict[str, Any]]:
     import time as _time
     from datetime import datetime as _dt
 
-    if days > 700:
-        span = "5year"
-    elif days > 250:
-        span = "3year"
-    elif days > 100:
-        span = "year"
-    else:
-        span = "3month"
+    # Robinhood's daily-interval historicals only accept span="year" or
+    # span="5year" — no "3month"/"3year" option exists for daily bars (those
+    # are only valid with shorter intervals like "hour"). Passing anything
+    # else makes robin_stocks raise "Span must be ..." instead of the data
+    # we asked for.
+    span = "5year" if days > 300 else "year"
     try:
         candles = rh.stocks.get_stock_historicals(
             symbol, interval="day", span=span, bounds="regular"
