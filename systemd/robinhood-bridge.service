@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/JerStock/robinhood-bridge
-ExecStart=/home/pi/JerStock/robinhood-bridge/.venv/bin/python auto_push.py
+User=jimmydaux
+WorkingDirectory=/home/jimmydaux/JerStock/robinhood-bridge
+ExecStart=/home/jimmydaux/JerStock/robinhood-bridge/.venv/bin/python auto_push.py
 Restart=on-failure
 RestartSec=15
 
