@@ -5,11 +5,11 @@ Robinhood is now the sole data source), all running as systemd services that
 survive reboots.
 
 Everything below assumes the default `pi` user and the project unpacked at
-`/home/pi/wheel-toolkit`. Adjust paths if yours differ — the systemd unit
+`/home/pi/JerStock`. Adjust paths if yours differ — the systemd unit
 files in `systemd/` hardcode that path.
 
 ```
-/home/pi/wheel-toolkit/
+/home/pi/JerStock/
 ├── portfolio-app/
 └── robinhood-bridge/
 ```
@@ -54,7 +54,7 @@ doesn't hurt.
 ## 2. Dashboard (`portfolio-app/`)
 
 ```bash
-cd /home/pi/wheel-toolkit/portfolio-app
+cd /home/pi/JerStock/portfolio-app
 npm install
 npm run build     # the step swap matters for; give it a few minutes
 npm run start      # quick manual check before wiring up systemd
@@ -79,14 +79,14 @@ Rebuilding after code changes: `npm run build` then
 ## 3. Robinhood bridge (`robinhood-bridge/`)
 
 ```bash
-cd /home/pi/wheel-toolkit/robinhood-bridge
+cd /home/pi/JerStock/robinhood-bridge
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
 nano .env   # fill in ROBINHOOD_USERNAME / ROBINHOOD_PASSWORD, and:
-            # APP_DATA_DIR=/home/pi/wheel-toolkit/portfolio-app/data
+            # APP_DATA_DIR=/home/pi/JerStock/portfolio-app/data
 ```
 
 **First-time auth**, interactively over SSH:
@@ -166,7 +166,7 @@ sudo apt install -y nginx
 ```
 
 ```nginx
-# /etc/nginx/sites-available/wheel-toolkit
+# /etc/nginx/sites-available/jerstock
 server {
     listen 80;
     server_name wheel.local;
@@ -178,7 +178,7 @@ server {
 ```
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/wheel-toolkit /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/jerstock /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 

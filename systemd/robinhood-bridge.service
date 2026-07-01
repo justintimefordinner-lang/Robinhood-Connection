@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/wheel-toolkit/robinhood-bridge
-ExecStart=/home/pi/wheel-toolkit/robinhood-bridge/.venv/bin/python auto_push.py
+WorkingDirectory=/home/pi/JerStock/robinhood-bridge
+ExecStart=/home/pi/JerStock/robinhood-bridge/.venv/bin/python auto_push.py
 Restart=on-failure
 RestartSec=15
 
