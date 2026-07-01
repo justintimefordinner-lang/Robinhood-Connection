@@ -1,3 +1,4 @@
+cat > ~/JerStock/robinhood-bridge/robinhood_client.py << 'PYEOF'
 """
 robinhood_client.py
 ====================
@@ -250,13 +251,14 @@ def get_price_history(rh, symbol: str, days: int = 400) -> list[dict[str, Any]]:
     import time as _time
     from datetime import datetime as _dt
 
-      # Robinhood's daily-interval historicals only accept span="year" or
-    # span="5year" — no "3month"/"3year" option exists for daily bars (those
-    # are only valid with shorter intervals like "hour"). Passing anything
-    # else makes robin_stocks silently return [None] instead of raising,
-    # which is worse than an error.
-    span = "5year" if days > 300 else "year"
-   
+    if days > 700:
+        span = "5year"
+    elif days > 250:
+        span = "3year"
+    elif days > 100:
+        span = "year"
+    else:
+        span = "3month"
     try:
         candles = rh.stocks.get_stock_historicals(
             symbol, interval="day", span=span, bounds="regular"
@@ -360,7 +362,7 @@ def get_option_chain(
                 md = None
             if throttle_sec:
                 _time.sleep(throttle_sec)
-          if not md:
+            if not md:
                 continue
             # robin_stocks' get_option_market_data returns a list of lists —
             # one inner list per symbol passed in, even for a single symbol —
@@ -425,3 +427,4 @@ def vix_band(vix: float | None) -> dict | None:
 def vix_regime(vix: float | None) -> str | None:
     band = vix_band(vix)
     return band["regime"] if band else None
+PYEOF
