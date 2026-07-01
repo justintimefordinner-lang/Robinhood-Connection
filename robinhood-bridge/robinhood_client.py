@@ -360,10 +360,19 @@ def get_option_chain(
                 md = None
             if throttle_sec:
                 _time.sleep(throttle_sec)
-            if not md:
+          if not md:
                 continue
-            row = md[0] if isinstance(md, list) and md else (md if isinstance(md, dict) else None)
-            if not row:
+            # robin_stocks' get_option_market_data returns a list of lists —
+            # one inner list per symbol passed in, even for a single symbol —
+            # so this can be nested more than one level deep depending on
+            # version. Unwrap however many levels actually show up.
+            row = md
+            while isinstance(row, list):
+                if not row:
+                    row = None
+                    break
+                row = row[0]
+            if not isinstance(row, dict):
                 continue
             iv = _to_float(row.get("implied_volatility"))
             strike_book[str(k)] = [{
