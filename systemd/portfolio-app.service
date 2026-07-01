@@ -4,15 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/JerStock/portfolio-app
+User=jimmydaux
+WorkingDirectory=/home/jimmydaux/JerStock/portfolio-app
 # Use the production build, not `next dev` — dev mode recompiles on every
 # request and is noticeably slower on Pi-class hardware.
 ExecStart=/usr/bin/npm run start
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
-Environment=PORT=3000
+Environment=PORT=3001
 
 [Install]
 WantedBy=multi-user.target
