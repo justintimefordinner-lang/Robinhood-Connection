@@ -1,0 +1,8 @@
+[Unit]
+Description=Robinhood bridge - daily trade history sync
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/wheel-toolkit/robinhood-bridge
+ExecStart=/home/pi/wheel-toolkit/robinhood-bridge/.venv/bin/python sync_trade_history.py

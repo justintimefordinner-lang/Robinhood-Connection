@@ -1,0 +1,18 @@
+[Unit]
+Description=Wheel Toolkit dashboard (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/wheel-toolkit/portfolio-app
+# Use the production build, not `next dev` — dev mode recompiles on every
+# request and is noticeably slower on Pi-class hardware.
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target

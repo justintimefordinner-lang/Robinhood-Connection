@@ -1,0 +1,38 @@
+# ===== SECRETS — never commit =====
+.env
+.env.*
+!.env.example
+token.json
+*token*.json
+service_account*.json
+*credentials*.json
+*.pem
+*.key
+
+# Robinhood session cache, if ever written inside the repo instead of $HOME
+.tokens/
+
+# ===== Python =====
+.venv/
+.venv*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+build/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# ===== Real account data (the bridge writes these locally) =====
+portfolio-app/data/*.json
+
+# ===== Misc / local =====
+.DS_Store
+*.log
+export_log.txt
