@@ -3,6 +3,6 @@ Description=Robinhood bridge - daily trade history sync
 
 [Service]
 Type=oneshot
-User=pi
-WorkingDirectory=/home/pi/JerStock/robinhood-bridge
-ExecStart=/home/pi/JerStock/robinhood-bridge/.venv/bin/python sync_trade_history.py
+User=jimmydaux
+WorkingDirectory=/home/jimmydaux/JerStock/robinhood-bridge
+ExecStart=/home/jimmydaux/JerStock/robinhood-bridge/.venv/bin/python sync_trade_history.py
