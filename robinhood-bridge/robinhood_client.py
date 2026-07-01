@@ -1,4 +1,3 @@
-cat > ~/JerStock/robinhood-bridge/robinhood_client.py << 'PYEOF'
 """
 robinhood_client.py
 ====================
@@ -427,4 +426,3 @@ def vix_band(vix: float | None) -> dict | None:
 def vix_regime(vix: float | None) -> str | None:
     band = vix_band(vix)
     return band["regime"] if band else None
-PYEOF
