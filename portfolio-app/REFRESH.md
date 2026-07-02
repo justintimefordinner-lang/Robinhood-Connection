@@ -65,16 +65,20 @@ Finally **delete `data/refresh-request.json`** to clear the pending flag.
 ## Forcing an am_report refresh (Morning Brief)
 
 The **Brief** tab has its own "Updated …" button (top right), separate from the
-portfolio refresh above. Tapping it writes `data/am-refresh-request.json` →
-`{ "requestedAt": "<ISO>" }` via `/api/am-refresh`. A refresh is pending while
-that file's `requestedAt` is newer than `data/am_report.json`'s `meta.asOf`.
+portfolio refresh above — and unlike that one, **it doesn't need Claude Code**.
+`am_report.py` already authenticates to Robinhood on its own via
+`robinhood_client.py`, so tapping the button (`POST /api/am-refresh`) just spawns
+`python3 am_report.py` directly on the server as a detached subprocess, logging
+to `data/am-refresh.log`. When the script exits it has rewritten
+`data/am_report.json` with a newer `meta.asOf`; the route handler then deletes
+`data/am-refresh-request.json`, which is only used to prevent double-taps while
+a run is already in flight.
 
-To fulfill: re-run the am_report engine (`python am_report.py`, or
-`python am_report.py --ladders` if only the put ladders need a fast-path
-refresh) so it rewrites `data/am_report.json` with a newer `meta.asOf`, then
-**delete `data/am-refresh-request.json`**. The button polls `/api/am-status`
-and flips to "Updated" automatically once it sees the newer `asOf`. Read-only,
-same as the rest of this runbook.
+The button polls `/api/am-status` every 3s and flips to "Updated" automatically
+once it sees the newer `asOf` — nothing for you to do. If a refresh seems stuck,
+check `data/am-refresh.log` for the Python traceback, and confirm the server
+process has a working `python3` on `PATH` (or set the `AM_REPORT_PYTHON` env var
+to a specific interpreter, e.g. a virtualenv's `bin/python`, if it doesn't).
 
 
 
