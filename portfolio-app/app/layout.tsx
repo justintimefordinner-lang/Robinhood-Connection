@@ -40,15 +40,20 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full sm:flex sm:min-h-screen sm:items-center sm:justify-center sm:bg-neutral-900 sm:py-6">
-        {/* Desktop: frame the app like a phone for local testing (full-bleed on a
-            real phone <640px). The frame is a flex column — content scrolls in the
-            middle, the BottomNav is the static bottom row so it never scrolls. On a
-            real phone the nav stays `fixed` exactly as before. */}
-        <div className="relative w-full bg-bg sm:flex sm:h-[860px] sm:max-h-[calc(100dvh-3rem)] sm:w-[400px] sm:flex-col sm:overflow-hidden sm:rounded-[2.75rem] sm:border-[6px] sm:border-neutral-800 sm:shadow-2xl sm:shadow-black/60">
+      <body className="min-h-full pointer-fine:flex pointer-fine:min-h-screen pointer-fine:items-center pointer-fine:justify-center pointer-fine:bg-neutral-900 pointer-fine:py-6">
+        {/* Real desktop mouse: frame the app like a phone for local preview
+            (a resized browser window is still "pointer: fine", so it keeps
+            getting the mockup). Real touch devices — phones AND tablets —
+            skip this entirely and get a full-bleed, width-responsive layout:
+            phone widths look exactly as before; tablet widths scale up via
+            the inner container's md:/lg: max-width instead of being boxed
+            into a 400px frame. */}
+        <div className="relative w-full bg-bg pointer-fine:flex pointer-fine:h-[860px] pointer-fine:max-h-[calc(100dvh-3rem)] pointer-fine:w-[400px] pointer-fine:flex-col pointer-fine:overflow-hidden pointer-fine:rounded-[2.75rem] pointer-fine:border-[6px] pointer-fine:border-neutral-800 pointer-fine:shadow-2xl pointer-fine:shadow-black/60">
           <PrivacyProvider>
             <MarginModeProvider>
-              <div className="mx-auto w-full max-w-md sm:min-h-0 sm:flex-1 sm:overflow-y-auto sm:pb-6">{children}</div>
+              <div className="mx-auto w-full max-w-md md:max-w-4xl lg:max-w-6xl pointer-fine:max-w-md pointer-fine:min-h-0 pointer-fine:flex-1 pointer-fine:overflow-y-auto pointer-fine:pb-6">
+                {children}
+              </div>
               <BottomNav />
             </MarginModeProvider>
           </PrivacyProvider>

@@ -231,11 +231,13 @@ export function AmReportView({ report }: { report: AmReport }) {
         </p>
       )}
 
-      <div className="mt-3">
-        <RegimeBanner r={report.regime} />
+      {/* Tablet+: regime and movers sit side by side instead of stacking. */}
+      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+        <div className="mt-3">
+          <RegimeBanner r={report.regime} />
+        </div>
+        {report.movers && <Movers movers={report.movers} />}
       </div>
-
-      {report.movers && <Movers movers={report.movers} />}
 
       <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">CSP Board</h3>
       <p className="mb-2 px-1 text-[10px] text-muted">
@@ -288,34 +290,37 @@ export function AmReportView({ report }: { report: AmReport }) {
         </p>
       )}
 
-      {report.landmines && report.landmines.length > 0 && (
-        <>
-          <h3 className="mb-1 mt-5 px-1 text-sm font-semibold text-amber-200">⚠ Landmines</h3>
-          <p className="mb-2 px-1 text-[10px] text-muted">Approved names pulled OFF the board — earnings inside the danger window</p>
-          <Card className="divide-y divide-border p-0">
-            {report.landmines.map((lm) => (
-              <div key={lm.sym} className="flex items-center justify-between px-3 py-2 text-[11px]">
-                <span className="font-semibold">{lm.sym}</span>
-                <span className="text-right text-amber-300">
-                  Earnings {lm.erDate ?? "soon"}{lm.erDays != null ? ` · ${lm.erDays}d` : ""}
-                </span>
-              </div>
-            ))}
-          </Card>
-        </>
-      )}
+      {/* Tablet+: landmines and the heat map sit side by side. */}
+      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+        {report.landmines && report.landmines.length > 0 && (
+          <div>
+            <h3 className="mb-1 mt-5 px-1 text-sm font-semibold text-amber-200">⚠ Landmines</h3>
+            <p className="mb-2 px-1 text-[10px] text-muted">Approved names pulled OFF the board — earnings inside the danger window</p>
+            <Card className="divide-y divide-border p-0">
+              {report.landmines.map((lm) => (
+                <div key={lm.sym} className="flex items-center justify-between px-3 py-2 text-[11px]">
+                  <span className="font-semibold">{lm.sym}</span>
+                  <span className="text-right text-amber-300">
+                    Earnings {lm.erDate ?? "soon"}{lm.erDays != null ? ` · ${lm.erDays}d` : ""}
+                  </span>
+                </div>
+              ))}
+            </Card>
+          </div>
+        )}
 
-      {report.vrpGroups.length > 0 && (
-        <>
-          <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">Premium heat map</h3>
-          <p className="mb-2 px-1 text-[10px] text-muted">Where premium is actually fat — VRP (IV vs realized) by group · tap a group for its names</p>
-          <Card className="divide-y divide-border p-0">
-            {report.vrpGroups.map((g) => (
-              <HeatGroup key={g.group} g={g} />
-            ))}
-          </Card>
-        </>
-      )}
+        {report.vrpGroups.length > 0 && (
+          <div>
+            <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">Premium heat map</h3>
+            <p className="mb-2 px-1 text-[10px] text-muted">Where premium is actually fat — VRP (IV vs realized) by group · tap a group for its names</p>
+            <Card className="divide-y divide-border p-0">
+              {report.vrpGroups.map((g) => (
+                <HeatGroup key={g.group} g={g} />
+              ))}
+            </Card>
+          </div>
+        )}
+      </div>
 
       {report.steerClear.length > 0 && (
         <div className="mt-5">

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Targets real desktop pointers (mouse + hover capable) — NOT touch devices.
+   A tablet is touch/coarse-pointer even at desktop-sized widths, so gating the
+   phone-mockup preview frame on this instead of a raw width breakpoint means
+   tablets get the real, full-width responsive layout instead of being shrunk
+   into a 400px phone frame the way a resized desktop browser window is. */
+@custom-variant pointer-fine (@media (hover: hover) and (pointer: fine));
+
 :root {
   --bg: #0a0e14;
   --surface: #121826;
