@@ -6,6 +6,7 @@ import path from "node:path";
 import type { AmReport } from "./am-report-types";
 
 export const AM_REPORT_PATH = path.join(process.cwd(), "data", "am_report.json");
+export const AM_REQUEST_PATH = path.join(process.cwd(), "data", "am-refresh-request.json");
 
 export function getAmReport(): AmReport | null {
   try {
@@ -16,4 +17,25 @@ export function getAmReport(): AmReport | null {
     // missing or malformed
   }
   return null;
+}
+
+export interface AmRefreshRequest {
+  requestedAt: string;
+}
+
+export function readAmRequest(): AmRefreshRequest | null {
+  try {
+    return JSON.parse(fs.readFileSync(AM_REQUEST_PATH, "utf8")) as AmRefreshRequest;
+  } catch {
+    return null;
+  }
+}
+
+/** A refresh is pending when a request exists that is newer than the report. */
+export function isAmRefreshPending(): boolean {
+  const req = readAmRequest();
+  if (!req) return false;
+  const report = getAmReport();
+  if (!report) return true;
+  return new Date(req.requestedAt).getTime() > new Date(report.meta.asOf).getTime();
 }

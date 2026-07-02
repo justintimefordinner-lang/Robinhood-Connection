@@ -62,7 +62,21 @@ Finally **delete `data/refresh-request.json`** to clear the pending flag.
 
 > Read-only: never place trades or move money. This flow only reads positions.
 
-## Regenerating CSP candidates
+## Forcing an am_report refresh (Morning Brief)
+
+The **Brief** tab has its own "Updated …" button (top right), separate from the
+portfolio refresh above. Tapping it writes `data/am-refresh-request.json` →
+`{ "requestedAt": "<ISO>" }` via `/api/am-refresh`. A refresh is pending while
+that file's `requestedAt` is newer than `data/am_report.json`'s `meta.asOf`.
+
+To fulfill: re-run the am_report engine (`python am_report.py`, or
+`python am_report.py --ladders` if only the put ladders need a fast-path
+refresh) so it rewrites `data/am_report.json` with a newer `meta.asOf`, then
+**delete `data/am-refresh-request.json`**. The button polls `/api/am-status`
+and flips to "Updated" automatically once it sees the newer `asOf`. Read-only,
+same as the rest of this runbook.
+
+
 
 The CSP tab's "Sell a new CSP — screened" section reads `data/csp-candidates.json`
 (loader `lib/csp-candidates.ts`; scoring `lib/csp-model.ts`). To refresh it:

@@ -90,6 +90,7 @@ function BoardRow({ row }: { row: AmBoardRow }) {
           {row.tier}
         </span>
         <span className="w-12 shrink-0 text-sm font-semibold">{row.sym}</span>
+        <span className="tabular w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
         {row.erSpansPut && (
           <span className="shrink-0 rounded bg-amber-500/25 px-1 py-0.5 text-[8px] font-bold uppercase text-amber-200" title="put spans earnings">
             ER{row.erDays != null ? ` ${row.erDays}d` : ""}
@@ -267,6 +268,7 @@ export function AmReportView({ report }: { report: AmReport }) {
           <div className="flex items-center gap-2 px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
             <span className="w-7 shrink-0 text-center">Tier</span>
             <span className="w-12 shrink-0">Tkr</span>
+            <span className="w-14 shrink-0">Price</span>
             <span className="w-7 shrink-0">Scr</span>
             <span className="w-8 shrink-0">VRP</span>
             <span className="flex-1" />
