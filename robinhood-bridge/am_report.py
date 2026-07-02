@@ -256,13 +256,20 @@ def _near_monthly_exp(exp_map: dict) -> str | None:
 
 
 def _put_at_delta(strikes: dict, target: float) -> dict | None:
-    """Nearest put to `target` delta within one expiration's strike map."""
+    """Nearest put to `target` delta (magnitude) within one expiration's strike map.
+    Robinhood's put deltas come back as positive magnitudes, not the signed (negative)
+    convention some other data sources use, so we compare on abs(delta) vs abs(target)
+    rather than raw values — otherwise every target collapses onto the same
+    smallest-delta strike (abs(dl - target) is monotonic in dl when dl is always
+    positive and target is negative, independent of which target you pick)."""
+    target = abs(target)
     best = None
     for strike, lst in strikes.items():
         c = lst[0]
         dl = c.get("delta")
         if dl in (None, -999, -999.0):
             continue
+        dl = abs(dl)
         if best is None or abs(dl - target) < abs(best["delta"] - target):
             best = {"strike": float(strike), "delta": dl, "bid": c.get("bid"),
                     "ask": c.get("ask"), "mark": c.get("mark"), "oi": c.get("openInterest")}
@@ -291,7 +298,7 @@ def put_ladder(chain: dict) -> list[dict]:
     exp_label = exp.split(":")[0]
     legs = []
     for dtarget in (0.30, 0.25, 0.20):
-        leg = _put_at_delta(pmap[exp], -dtarget)
+        leg = _put_at_delta(pmap[exp], dtarget)
         if not leg:
             continue
         leg["dTarget"] = int(round(dtarget * 100))
