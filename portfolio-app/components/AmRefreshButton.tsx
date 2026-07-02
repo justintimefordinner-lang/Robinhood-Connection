@@ -2,9 +2,10 @@
 
 // Force-refresh button for the Morning Brief. Same request/poll pattern as
 // components/RefreshButton.tsx (the portfolio snapshot's refresh button), but
-// targets the am_report feed: it queues data/am-refresh-request.json via
-// /api/am-refresh, then polls /api/am-status until report.meta.asOf moves past
-// the request's timestamp, at which point it calls router.refresh().
+// targets the am_report feed: tapping it hits /api/am-refresh, which spawns
+// am_report.py directly (no Claude Code needed — the script already talks to
+// Robinhood on its own). It then polls /api/am-status until report.meta.asOf
+// moves past the request's timestamp, at which point it calls router.refresh().
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -90,7 +91,7 @@ export function AmRefreshButton({ asOf }: { asOf: string }) {
     phase === "updated"
       ? "Updated"
       : phase === "pending"
-        ? "Awaiting Claude…"
+        ? "Refreshing…"
         : phase === "requesting"
           ? "Requesting…"
           : `Updated ${stamp}`;
