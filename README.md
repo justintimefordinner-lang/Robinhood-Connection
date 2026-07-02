@@ -19,7 +19,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000> and click **Example** in the header. The app loads a
+Open <http://localhost:3001> and click **Example** in the header. The app loads a
 complete built-in demo portfolio (`lib/example.ts`) and every screen populates —
 the fastest way to see exactly how it looks and behaves.
 
