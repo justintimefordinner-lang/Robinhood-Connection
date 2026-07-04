@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { useRef, type ReactNode } from "react";
+import { useRef, useTransition, type ReactNode } from "react";
 
 // Same order as BottomNav's TABS — keep these in sync.
 const TAB_ORDER = ["/", "/options", "/pnl", "/vix", "/briefing", "/research"];
@@ -36,10 +36,45 @@ const MIN_DISTANCE_PX = 70; // ignore short brushes
 const MAX_DURATION_MS = 600; // ignore slow drags (probably not an intentional swipe)
 const HORIZONTAL_BIAS = 1.5; // dx must clearly dominate dy, not a diagonal scroll
 
+// Minimal typing for the View Transitions API — not yet in every TS DOM lib
+// version, and not every browser supports it (notably Safari/iOS as of
+// writing). Where it's missing, `navigate()` below just falls back to a
+// plain instant router.push with no animation — nothing breaks either way.
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (callback: () => void | Promise<void>) => { finished: Promise<void> };
+};
+
 export function SwipeNav({ children, className }: { children: ReactNode; className?: string }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [, startTransition] = useTransition();
   const start = useRef<{ x: number; y: number; t: number; skip: boolean } | null>(null);
+
+  function navigate(path: string, direction: "left" | "right") {
+    const doc = document as ViewTransitionDocument;
+    if (!doc.startViewTransition) {
+      router.push(path);
+      return;
+    }
+    // The slide direction the CSS keyframes key off of (see globals.css).
+    document.documentElement.dataset.swipeDir = direction;
+    const transition = doc.startViewTransition(() => {
+      // startViewTransition needs to know when the DOM actually reflects the
+      // new route before it captures the "after" snapshot. Wrapping
+      // router.push in React's own transition and resolving once it's
+      // committed is the reliable way to signal that (same approach
+      // small view-transition helper libraries use under the hood).
+      return new Promise<void>((resolve) => {
+        startTransition(() => {
+          router.push(path);
+          resolve();
+        });
+      });
+    });
+    transition.finished.finally(() => {
+      delete document.documentElement.dataset.swipeDir;
+    });
+  }
 
   return (
     <div
@@ -70,7 +105,7 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
         if (idx === -1) return;
         const nextIdx = dx < 0 ? idx + 1 : idx - 1; // swipe left -> next tab, swipe right -> previous
         if (nextIdx < 0 || nextIdx >= TAB_ORDER.length) return;
-        router.push(TAB_ORDER[nextIdx]);
+        navigate(TAB_ORDER[nextIdx], dx < 0 ? "left" : "right");
       }}
     >
       {children}

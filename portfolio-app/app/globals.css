@@ -60,3 +60,49 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Swipe-to-navigate sliding animation (see components/SwipeNav.tsx). Only
+   fires in browsers that support the View Transitions API — everywhere else
+   navigation is just instant, no animation, no breakage. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Swiped left -> moving to the next tab: current page exits to the left,
+   next page slides in from the right. */
+html[data-swipe-dir="left"]::view-transition-old(root) {
+  animation-name: swipe-out-left;
+}
+html[data-swipe-dir="left"]::view-transition-new(root) {
+  animation-name: swipe-in-right;
+}
+
+/* Swiped right -> moving to the previous tab: mirror image. */
+html[data-swipe-dir="right"]::view-transition-old(root) {
+  animation-name: swipe-out-right;
+}
+html[data-swipe-dir="right"]::view-transition-new(root) {
+  animation-name: swipe-in-left;
+}
+
+@keyframes swipe-out-left {
+  to { transform: translateX(-100%); }
+}
+@keyframes swipe-in-right {
+  from { transform: translateX(100%); }
+}
+@keyframes swipe-out-right {
+  to { transform: translateX(100%); }
+}
+@keyframes swipe-in-left {
+  from { transform: translateX(-100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
