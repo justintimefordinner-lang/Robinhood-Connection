@@ -15,11 +15,13 @@ Writes data/am_report.json for the app's Briefing tab. Four blocks:
   • GAMMA   — naive dealer gamma profile per board name: flip, call wall, put wall.
 
 PERFORMANCE NOTE: robinhood_client.get_option_chain() fetches ONE expiration
-per name (not Schwab's full 45-day/50-strike window) to keep call volume sane
-against Robinhood's unofficial, per-strike API — see that function's
-docstring. A full run across ~56 approved names still means several hundred
-HTTP calls; the default AM_REPORT_PUSH_INTERVAL (30 min) and throttle keep
-this from hammering Robinhood, but trimming your approved roster helps too.
+per name (not Schwab's full 45-day/50-strike window), and for puts, only
+strikes inside a %-OTM band aimed at the -0.15..-0.30 delta zone this screen
+actually cares about (rather than every near-the-money strike) — see that
+function's docstring. A full run across ~56 approved names still means
+meaningful HTTP call volume; the default AM_REPORT_PUSH_INTERVAL (30 min) and
+throttle keep this from hammering Robinhood, but trimming your approved
+roster helps too.
 
     python am_report.py        # build + write data/am_report.json
 """
@@ -721,7 +723,7 @@ def refresh_ladders(force: bool = False) -> int | None:
     updated = 0
     throttle = CONFIG["ladder_throttle_sec"]
     for row in board:
-        chain = rc.get_option_chain(rh, row["sym"], days=45, strike_count=14, puts_only=True,
+        chain = rc.get_option_chain(rh, row["sym"], days=45, puts_only=True,
                                      throttle_sec=throttle)
         if not chain:
             continue

@@ -290,18 +290,33 @@ def get_price_history(rh, symbol: str, days: int = 400) -> list[dict[str, Any]]:
 # in ONE HTTP call. Robinhood's retail API has no batch equivalent — each
 # strike's greeks/OI needs its own call. To keep this from turning a ~56-name
 # board into thousands of requests, this version fetches only ONE expiration
-# (the nearest to the ~30-DTE target, same one put_ladder() actually uses) and
-# a modest strike count around the money, rather than Schwab's full 45-day/
-# 50-strike window. That means am_report's gamma-wall math runs on a narrower
-# strike set than the Schwab version did — still directionally useful, just
-# less exhaustive. If you widen `strike_count` or fetch multiple expirations,
-# watch for HTTP 429s; robin_stocks talks to an unofficial, undocumented API
-# and Robinhood can and does throttle/block unusual call volume.
+# (the nearest to the ~30-DTE target, same one put_ladder() actually uses),
+# and for puts, only strikes inside a %-OTM band aimed at the -0.15..-0.30
+# delta zone the CSP screen/gate actually use (`put_pct_band`) — rather than
+# the `strike_count` strikes nearest the money, most of which land outside
+# that band and get fetched for nothing. Calls (gamma-wall side) still use a
+# modest spot-centered spread. That means am_report's gamma-wall math runs on
+# a narrower strike set than the Schwab version did — still directionally
+# useful, just less exhaustive. If you widen `strike_count`/`put_pct_band` or
+# fetch multiple expirations, watch for HTTP 429s; robin_stocks talks to an
+# unofficial, undocumented API and Robinhood can and does throttle/block
+# unusual call volume.
 # ---------------------------------------------------------------------------
 def get_option_chain(
-    rh, symbol: str, days: int = 45, strike_count: int = 14, puts_only: bool = False,
-    throttle_sec: float = 0.2,
+    rh, symbol: str, days: int = 45, strike_count: int = 8, puts_only: bool = False,
+    throttle_sec: float = 0.2, put_pct_band: tuple[float, float] = (3.0, 20.0),
 ) -> dict[str, Any] | None:
+    """`put_pct_band` pre-filters PUT strikes to a %-below-spot price window before
+    spending any per-strike API calls, instead of just grabbing the `strike_count`
+    strikes nearest the money. Delta isn't known until after a strike's quote comes
+    back, so this is a price-based proxy for it — the default (3%-20% OTM) is wide
+    enough to bracket the -0.15..-0.30 delta zone that both the CSP screen's gate
+    (_put_at_delta, target 0.30) and the display ladder (put_ladder, centered on
+    20-delta) actually use, across most IV regimes, while skipping the near-ATM/ITM
+    and deep-OTM strikes that were previously fetched and then thrown away. Calls
+    (only pulled when puts_only=False, for the gamma-wall profile) still use a
+    plain spot-centered spread since that needs the full range either side of spot.
+    strike_count now also caps how many strikes are actually pulled per side."""
     import time as _time
     from datetime import date as _date
 
@@ -336,23 +351,41 @@ def get_option_chain(
 
     try:
         puts = rh.options.find_options_by_expiration(symbol, expirationDate=best_exp, optionType="put") or []
-        strikes = sorted({_to_float(p.get("strike_price")) for p in puts if p.get("strike_price")})
+        all_strikes = sorted({_to_float(p.get("strike_price")) for p in puts if p.get("strike_price")})
     except Exception:
-        strikes = []
-    if not strikes:
+        all_strikes = []
+    if not all_strikes:
         return None
 
     if spot is not None:
-        strikes = sorted(strikes, key=lambda k: abs(k - spot))[:strike_count]
+        lo_pct, hi_pct = put_pct_band
+        band_lo, band_hi = spot * (1 - hi_pct / 100), spot * (1 - lo_pct / 100)
+        put_strikes = [k for k in all_strikes if band_lo <= k <= band_hi]
+        if not put_strikes:
+            # Strike spacing on this name is wider than the band (e.g. a $10-wide
+            # chain) — fall back to the strikes nearest a ~10%-OTM anchor so the
+            # ladder isn't empty.
+            anchor = spot * 0.90
+            put_strikes = sorted(all_strikes, key=lambda k: abs(k - anchor))[:strike_count]
+        else:
+            put_strikes = sorted(put_strikes, key=lambda k: abs(k - spot))[:strike_count]
     else:
-        strikes = strikes[:strike_count]
+        put_strikes = all_strikes[:strike_count]
 
-    sides = ["put"] if puts_only else ["put", "call"]
+    if puts_only:
+        strikes_by_side = {"put": put_strikes}
+    else:
+        if spot is not None:
+            call_strikes = sorted(all_strikes, key=lambda k: abs(k - spot))[:strike_count]
+        else:
+            call_strikes = all_strikes[:strike_count]
+        strikes_by_side = {"put": put_strikes, "call": call_strikes}
+
     put_map: dict[str, Any] = {}
     call_map: dict[str, Any] = {}
-    for side in sides:
+    for side, side_strikes in strikes_by_side.items():
         strike_book: dict[str, list[dict[str, Any]]] = {}
-        for k in strikes:
+        for k in side_strikes:
             try:
                 md = rh.options.get_option_market_data(symbol, best_exp, str(k), side)
             except Exception:
