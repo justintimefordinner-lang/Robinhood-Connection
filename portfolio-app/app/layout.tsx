@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/BottomNav";
+import { SwipeNav } from "@/components/SwipeNav";
 import { PrivacyProvider } from "@/components/privacy";
 import { MarginModeProvider } from "@/components/margin-mode";
 
@@ -51,9 +52,9 @@ export default function RootLayout({
         <div className="relative w-full bg-bg pointer-fine:flex pointer-fine:h-[860px] pointer-fine:max-h-[calc(100dvh-3rem)] pointer-fine:w-[400px] pointer-fine:flex-col pointer-fine:overflow-hidden pointer-fine:rounded-[2.75rem] pointer-fine:border-[6px] pointer-fine:border-neutral-800 pointer-fine:shadow-2xl pointer-fine:shadow-black/60">
           <PrivacyProvider>
             <MarginModeProvider>
-              <div className="mx-auto w-full max-w-md md:max-w-4xl lg:max-w-6xl pointer-fine:max-w-md pointer-fine:min-h-0 pointer-fine:flex-1 pointer-fine:overflow-y-auto pointer-fine:pb-6">
+              <SwipeNav className="mx-auto w-full max-w-md md:max-w-4xl lg:max-w-6xl pointer-fine:max-w-md pointer-fine:min-h-0 pointer-fine:flex-1 pointer-fine:overflow-y-auto pointer-fine:pb-6">
                 {children}
-              </div>
+              </SwipeNav>
               <BottomNav />
             </MarginModeProvider>
           </PrivacyProvider>

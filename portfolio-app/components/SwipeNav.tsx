@@ -1,0 +1,79 @@
+"use client";
+
+import { useRouter, usePathname } from "next/navigation";
+import { useRef, type ReactNode } from "react";
+
+// Same order as BottomNav's TABS — keep these in sync.
+const TAB_ORDER = ["/", "/options", "/pnl", "/vix", "/briefing", "/research"];
+
+// Mirrors BottomNav's "active" logic: "/" is exact, everything else is a
+// startsWith match, so a sub-page like /options/csp still counts as "Options"
+// for swipe purposes.
+function currentTabIndex(pathname: string): number {
+  if (pathname === "/") return 0;
+  for (let i = 1; i < TAB_ORDER.length; i++) {
+    if (pathname.startsWith(TAB_ORDER[i])) return i;
+  }
+  return -1; // unrecognized route — don't swipe-nav from here
+}
+
+// Walk up from the touch target: if it's inside something that itself
+// scrolls horizontally (e.g. a wide table with overflow-x-auto), let that
+// element have the gesture instead of hijacking it for tab navigation.
+function isInsideHorizontalScroller(target: EventTarget | null): boolean {
+  let node = target as HTMLElement | null;
+  while (node && node !== document.body) {
+    if (node.scrollWidth > node.clientWidth + 4) {
+      const overflowX = getComputedStyle(node).overflowX;
+      if (overflowX === "auto" || overflowX === "scroll") return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
+const MIN_DISTANCE_PX = 70; // ignore short brushes
+const MAX_DURATION_MS = 600; // ignore slow drags (probably not an intentional swipe)
+const HORIZONTAL_BIAS = 1.5; // dx must clearly dominate dy, not a diagonal scroll
+
+export function SwipeNav({ children, className }: { children: ReactNode; className?: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const start = useRef<{ x: number; y: number; t: number; skip: boolean } | null>(null);
+
+  return (
+    <div
+      className={className}
+      onTouchStart={(e) => {
+        const t = e.touches[0];
+        start.current = {
+          x: t.clientX,
+          y: t.clientY,
+          t: Date.now(),
+          skip: isInsideHorizontalScroller(e.target),
+        };
+      }}
+      onTouchEnd={(e) => {
+        const s = start.current;
+        start.current = null;
+        if (!s || s.skip) return;
+
+        const t = e.changedTouches[0];
+        const dx = t.clientX - s.x;
+        const dy = t.clientY - s.y;
+        const dt = Date.now() - s.t;
+        if (Math.abs(dx) < MIN_DISTANCE_PX) return;
+        if (Math.abs(dx) < Math.abs(dy) * HORIZONTAL_BIAS) return;
+        if (dt > MAX_DURATION_MS) return;
+
+        const idx = currentTabIndex(pathname);
+        if (idx === -1) return;
+        const nextIdx = dx < 0 ? idx + 1 : idx - 1; // swipe left -> next tab, swipe right -> previous
+        if (nextIdx < 0 || nextIdx >= TAB_ORDER.length) return;
+        router.push(TAB_ORDER[nextIdx]);
+      }}
+    >
+      {children}
+    </div>
+  );
+}

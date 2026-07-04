@@ -286,9 +286,15 @@ def _put_at_delta(strikes: dict, target: float) -> dict | None:
 
 
 def put_ladder(chain: dict) -> list[dict]:
-    """The 30 / 25 / 20-delta puts in the ~30-DTE expiration, each with premium %,
-    OI, spread, and annualized return (premPct × 365/DTE — how hard the collateral
-    works at that delta). First leg (30Δ) is the primary used for the entry gate."""
+    """Five real strikes from the actual ~30-DTE put chain, centered on the
+    20-delta line: the two nearest strikes with delta > 20 (closest to 20 from
+    above), then three strikes at-or-under 20-delta (closest available at/under
+    20, then the next two further out). Each leg reports its own observed
+    delta to 1 decimal (e.g. 24.3) rather than snapping to a fixed 30/25/20
+    target, so distinct strikes never collapse into duplicate rows on a
+    coarse/thin chain. Display only — the entry gate uses its own dedicated
+    30-delta lookup (_put_at_delta directly), so this doesn't touch tiering or
+    scoring."""
     from datetime import date
     pmap = chain.get("putExpDateMap") or {}
     exp = _near_monthly_exp(pmap)
@@ -296,12 +302,34 @@ def put_ladder(chain: dict) -> list[dict]:
         return []
     dte = (date.fromisoformat(exp.split(":")[0]) - date.today()).days
     exp_label = exp.split(":")[0]
-    legs = []
-    for dtarget in (0.30, 0.25, 0.20):
-        leg = _put_at_delta(pmap[exp], dtarget)
-        if not leg:
+
+    candidates = []
+    for strike, lst in pmap[exp].items():
+        c = lst[0]
+        dl = c.get("delta")
+        if dl in (None, -999, -999.0):
             continue
-        leg["dTarget"] = int(round(dtarget * 100))
+        candidates.append((float(strike), abs(dl), c))
+    if not candidates:
+        return []
+    candidates.sort(key=lambda t: t[1], reverse=True)  # ITM (~1) -> deep OTM (~0)
+    cross = next((i for i, (_, dl, _) in enumerate(candidates) if dl <= 0.20), len(candidates))
+    selected = candidates[max(0, cross - 2):cross] + candidates[cross:cross + 3]
+
+    legs = []
+    for strike, dl, c in selected:
+        mark = c.get("mark") or (((c.get("bid") or 0) + (c.get("ask") or 0)) / 2)
+        prem_pct = (mark / strike * 100) if strike else 0.0
+        bid, ask = c.get("bid"), c.get("ask")
+        spread_pct = (((ask - bid) / mark) * 100) if (mark and bid is not None and ask is not None) else 999.0
+        leg = {
+            "dTarget": round(dl * 100, 1),
+            "strike": round(strike, 2),
+            "mark": round(mark, 2),
+            "premPct": round(prem_pct, 2),
+            "oi": int(c.get("openInterest") or 0),
+            "spreadPct": round(spread_pct, 1),
+        }
         leg["dte"] = dte
         leg["exp"] = exp_label
         leg["annPct"] = round(leg["premPct"] * 365 / dte, 1) if dte > 0 else None
@@ -416,8 +444,10 @@ def screen(sym: str, candles: list[dict], spy: list[float], chain: dict | None,
     if not tm["uptrend"]:
         fails.append("no 1.5y uptrend")
 
-    ladder = put_ladder(chain) if chain else []
-    put = ladder[0] if ladder else None   # 30Δ leg = the gate reference
+    pmap = (chain.get("putExpDateMap") or {}) if chain else {}
+    gate_exp = _near_monthly_exp(pmap) if pmap else None
+    put = _put_at_delta(pmap[gate_exp], 0.30) if gate_exp else None    # dedicated 30Δ gate reference, independent of the display ladder
+    ladder = put_ladder(chain) if chain else []    # display ladder (5 rungs) for this row's own output, e.g. the screener
     if not put:
         fails.append("no 30D/30Δ chain")
     else:
@@ -695,11 +725,14 @@ def refresh_ladders(force: bool = False) -> int | None:
                                      throttle_sec=throttle)
         if not chain:
             continue
-        ladder = put_ladder(chain)
-        if not ladder:
+        pmap = chain.get("putExpDateMap") or {}
+        gate_exp = _near_monthly_exp(pmap) if pmap else None
+        gate_leg = _put_at_delta(pmap[gate_exp], 0.30) if gate_exp else None
+        if not gate_leg:
             continue
-        row["ladder"] = ladder
-        row["chain"] = ladder[0]
+        display_ladder = put_ladder(chain)
+        row["ladder"] = display_ladder if display_ladder else [gate_leg]
+        row["chain"] = gate_leg
         # refresh VRP live: fresh ATM IV vs the realized vol from the last full run
         spot = chain.get("underlyingPrice")
         iv = atm_iv(chain, spot) if spot else None
