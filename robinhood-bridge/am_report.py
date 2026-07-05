@@ -178,6 +178,17 @@ def sma(values: list[float], n: int) -> float | None:
     return sum(values[-n:]) / n if len(values) >= n else None
 
 
+def stdev(values: list[float], n: int) -> float | None:
+    """Population standard deviation over the last n values — the standard
+    Bollinger Band convention (no Bessel's correction)."""
+    if len(values) < n:
+        return None
+    window = values[-n:]
+    mean = sum(window) / n
+    var = sum((v - mean) ** 2 for v in window) / n
+    return math.sqrt(var)
+
+
 def realized_vol(closes: list[float], n: int = 20) -> float | None:
     """Annualised close-to-close volatility over the last n sessions."""
     if len(closes) < n + 1:
@@ -287,15 +298,21 @@ def _put_at_delta(strikes: dict, target: float) -> dict | None:
             "oi": int(best["oi"] or 0), "spreadPct": round(spread_pct, 1)}
 
 
-def put_ladder(chain: dict) -> list[dict]:
+def put_ladder(chain: dict, sma20: float | None = None, std20: float | None = None) -> list[dict]:
     """Five real strikes from the actual ~30-DTE put chain: the strike whose
     delta is closest to 20 (the anchor), plus the 2 nearest strikes with a
     higher delta and the 2 nearest with a lower delta. Each leg reports its
     own observed delta to 1 decimal (e.g. 24.3) rather than snapping to a
     fixed 30/25/20 target, so distinct strikes never collapse into duplicate
-    rows on a coarse/thin chain. Display only — the entry gate uses its own
-    dedicated 30-delta lookup (_put_at_delta directly), so this doesn't touch
-    tiering or scoring."""
+    rows on a coarse/thin chain. `sma20`/`std20` (if given) also get each leg
+    a `bbSigma`: how many standard deviations the strike sits from the 20-day
+    mean close — the same SMA20 trend_metrics() already uses for `bollUp`,
+    just paired with its stdev instead of a single above/below check. More
+    negative = further below the recent trading range = deeper OTM/more
+    cushion; near/above 0 means the strike sits inside or above the recent
+    range. Display only — the entry gate uses its own dedicated 30-delta
+    lookup (_put_at_delta directly), so this doesn't touch tiering or
+    scoring."""
     from datetime import date
     pmap = chain.get("putExpDateMap") or {}
     exp = _near_monthly_exp(pmap)
@@ -330,6 +347,7 @@ def put_ladder(chain: dict) -> list[dict]:
             "premPct": round(prem_pct, 2),
             "oi": int(c.get("openInterest") or 0),
             "spreadPct": round(spread_pct, 1),
+            "bbSigma": round((strike - sma20) / std20, 1) if (sma20 is not None and std20) else None,
         }
         leg["dte"] = dte
         leg["exp"] = exp_label
@@ -453,7 +471,9 @@ def screen(sym: str, candles: list[dict], spy: list[float], chain: dict | None,
         put["exp"] = exp_label
         put["dte"] = (date.fromisoformat(exp_label) - today).days
         put["annPct"] = round(put["premPct"] * 365 / put["dte"], 1) if put["dte"] > 0 else None
-    ladder = put_ladder(chain) if chain else []    # display ladder (5 rungs) for this row's own output, e.g. the screener
+    sma20 = sma(closes, 20)
+    std20 = stdev(closes, 20)
+    ladder = put_ladder(chain, sma20, std20) if chain else []    # display ladder (5 rungs) for this row's own output, e.g. the screener
     if not put:
         fails.append("no 30D/30Δ chain")
     else:
@@ -512,6 +532,12 @@ def screen(sym: str, candles: list[dict], spy: list[float], chain: dict | None,
         "score": round(score, 1), "tier": tier, "group": group_of(sym),
         "move": round(move, 2) if move is not None else None,
         "last": round(closes[-1], 2),
+        # Cached for refresh_ladders() (which skips the 600-day candle pull
+        # and so has no `closes` of its own to derive these from) so it can
+        # keep computing bbSigma on each lightweight intraday pass. Like
+        # trend/beta/gamma, treated as intraday-static.
+        "bb20": {"sma": round(sma20, 2) if sma20 is not None else None,
+                 "std": round(std20, 2) if std20 is not None else None},
         "relVol": rv_vol,
         "ivr": ivr, "ivrSamples": ivr_n,
         "erDays": er_days, "erDate": (earnings or {}).get(sym),
@@ -736,7 +762,7 @@ def refresh_ladders(force: bool = False) -> int | None:
         gate_leg = _put_at_delta(pmap[gate_exp], 0.30) if gate_exp else None
         if not gate_leg:
             continue
-        display_ladder = put_ladder(chain)
+        display_ladder = put_ladder(chain, (row.get("bb20") or {}).get("sma"), (row.get("bb20") or {}).get("std"))
         row["ladder"] = display_ladder if display_ladder else [gate_leg]
         row["chain"] = gate_leg
         # refresh VRP live: fresh ATM IV vs the realized vol from the last full run
