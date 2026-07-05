@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { useRef, useTransition, type ReactNode } from "react";
+import { useRef, useTransition, type ReactNode, type TouchEvent } from "react";
 
 // Same order as BottomNav's TABS — keep these in sync.
 const TAB_ORDER = ["/", "/options", "/pnl", "/vix", "/briefing", "/research"];
@@ -17,21 +17,6 @@ function currentTabIndex(pathname: string): number {
   return -1; // unrecognized route — don't swipe-nav from here
 }
 
-// Walk up from the touch target: if it's inside something that itself
-// scrolls horizontally (e.g. a wide table with overflow-x-auto), let that
-// element have the gesture instead of hijacking it for tab navigation.
-function isInsideHorizontalScroller(target: EventTarget | null): boolean {
-  let node = target as HTMLElement | null;
-  while (node && node !== document.body) {
-    if (node.scrollWidth > node.clientWidth + 4) {
-      const overflowX = getComputedStyle(node).overflowX;
-      if (overflowX === "auto" || overflowX === "scroll") return true;
-    }
-    node = node.parentElement;
-  }
-  return false;
-}
-
 const MIN_DISTANCE_PX = 70; // ignore short brushes
 const MAX_DURATION_MS = 600; // ignore slow drags (probably not an intentional swipe)
 const HORIZONTAL_BIAS = 1.5; // dx must clearly dominate dy, not a diagonal scroll
@@ -44,15 +29,27 @@ type ViewTransitionDocument = Document & {
   startViewTransition?: (callback: () => void | Promise<void>) => { finished: Promise<void> };
 };
 
+// Just the scrollable page container now — it no longer carries the swipe
+// gesture itself. See useSwipeGesture()/BottomNav below for why.
 export function SwipeNav({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={className}>{children}</div>;
+}
+
+// Swipe-to-change-tabs, meant to be wired to the bottom tab bar's own touch
+// events rather than the page content. Putting it on page content meant any
+// horizontal drag over a chart, a chip row, or just scrolling could get
+// misread as "change tabs"; the tab bar is a small, content-free surface
+// that's always the same regardless of which page you're on, so it doesn't
+// have that problem and swiping there reads as an intentional gesture.
+export function useSwipeGesture() {
   const router = useRouter();
   const pathname = usePathname();
   const [, startTransition] = useTransition();
-  const start = useRef<{ x: number; y: number; t: number; skip: boolean } | null>(null);
+  const start = useRef<{ x: number; y: number; t: number } | null>(null);
   // Continuously updated during the gesture so a touchcancel (which some
-  // browsers fire instead of touchend once they decide to hand a touch off
-  // to native scrolling) still has a last-known position to finish with,
-  // instead of silently dropping the swipe.
+  // browsers fire instead of touchend in some circumstances) still has a
+  // last-known position to finish with, instead of silently dropping the
+  // swipe.
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
   function navigate(path: string, direction: "left" | "right") {
@@ -67,8 +64,8 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
       // startViewTransition needs to know when the DOM actually reflects the
       // new route before it captures the "after" snapshot. Wrapping
       // router.push in React's own transition and resolving once it's
-      // committed is the reliable way to signal that (same approach
-      // small view-transition helper libraries use under the hood).
+      // committed is the reliable way to signal that (same approach small
+      // view-transition helper libraries use under the hood).
       return new Promise<void>((resolve) => {
         startTransition(() => {
           router.push(path);
@@ -85,7 +82,7 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
     const s = start.current;
     start.current = null;
     lastPos.current = null;
-    if (!s || s.skip) return;
+    if (!s) return;
 
     const dx = x - s.x;
     const dy = y - s.y;
@@ -101,43 +98,24 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
     navigate(TAB_ORDER[nextIdx], dx < 0 ? "left" : "right");
   }
 
-  return (
-    <div
-      // NOTE: deliberately no touch-action override here (leave it "auto").
-      // A pan-y restriction was tried here to stop the browser from ever
-      // claiming a horizontal drag as native scroll, but it interacts badly
-      // with this element's own overflow-y:auto on some mobile browsers —
-      // it can suppress vertical scrolling entirely (especially slow,
-      // controlled drags rather than fast flicks). The real fix for
-      // swipe-away not working was overflow-x-hidden below (see layout.tsx
-      // for why), which doesn't touch scrolling at all — so this doesn't
-      // need touch-action to also do its job.
-      className={className}
-      onTouchStart={(e) => {
-        const t = e.touches[0];
-        start.current = {
-          x: t.clientX,
-          y: t.clientY,
-          t: Date.now(),
-          skip: isInsideHorizontalScroller(e.target),
-        };
-        lastPos.current = { x: t.clientX, y: t.clientY };
-      }}
-      onTouchMove={(e) => {
-        const t = e.touches[0];
-        if (t) lastPos.current = { x: t.clientX, y: t.clientY };
-      }}
-      onTouchEnd={(e) => {
-        const t = e.changedTouches[0];
-        finish(t.clientX, t.clientY);
-      }}
-      onTouchCancel={() => {
-        // Fall back to the last position seen before the browser cancelled
-        // the sequence, rather than dropping the gesture entirely.
-        if (lastPos.current) finish(lastPos.current.x, lastPos.current.y);
-      }}
-    >
-      {children}
-    </div>
-  );
+  return {
+    onTouchStart(e: TouchEvent) {
+      const t = e.touches[0];
+      start.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+      lastPos.current = { x: t.clientX, y: t.clientY };
+    },
+    onTouchMove(e: TouchEvent) {
+      const t = e.touches[0];
+      if (t) lastPos.current = { x: t.clientX, y: t.clientY };
+    },
+    onTouchEnd(e: TouchEvent) {
+      const t = e.changedTouches[0];
+      finish(t.clientX, t.clientY);
+    },
+    onTouchCancel() {
+      // Fall back to the last position seen before the browser cancelled
+      // the sequence, rather than dropping the gesture entirely.
+      if (lastPos.current) finish(lastPos.current.x, lastPos.current.y);
+    },
+  };
 }
