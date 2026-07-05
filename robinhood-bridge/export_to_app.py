@@ -76,9 +76,18 @@ def _round(v: float | None, n: int = 2) -> float | None:
 def _kind_for(p: dict[str, Any]) -> str:
     """Robinhood positions carry no wheel-strategy classifier the way the
     Schwab bridge's category field does, so this is a best-effort guess from
-    shape alone: short puts -> csp, long calls far out -> leap-call, long puts
-    far out -> hedge, everything else -> other. Good enough to populate the
-    tabs; refine by hand if you run a mixed book."""
+    shape alone: short puts -> csp, long calls -> leap-call (no DTE gate —
+    see below), long puts far out -> hedge, everything else -> other. Good
+    enough to populate the tabs; refine by hand if you run a mixed book.
+
+    Long calls are classified as leap-call regardless of DTE. This used to
+    require dte >= 270, but that meant a position tracked as a LEAP would
+    silently fall out of the LEAPs page (reclassified to "other" and hidden
+    from that tab) purely because time passed and it crossed the threshold
+    — even though it's the same open position you originally entered as a
+    LEAP. Every open long call belongs on the LEAPs page for the life of
+    the trade; DTE is still shown as a column there so you can see it
+    aging, it's just no longer a cutoff for visibility."""
     pc = (p.get("put_call") or "").upper()
     is_put = pc == "PUT"
     signed_qty = p.get("quantity") or 0
@@ -89,7 +98,7 @@ def _kind_for(p: dict[str, Any]) -> str:
         return "csp"
     if not is_put and is_short:
         return "covered-call"
-    if not is_put and not is_short and (dte is None or dte >= 270):
+    if not is_put and not is_short:
         return "leap-call"
     if is_put and not is_short and (dte is None or dte >= 270):
         return "leap-put-hedge"
