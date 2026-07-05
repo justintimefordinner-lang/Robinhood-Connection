@@ -56,18 +56,13 @@ export default function RootLayout({
         <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg pointer-fine:h-[860px] pointer-fine:max-h-[calc(100dvh-3rem)] pointer-fine:w-[400px] pointer-fine:rounded-[2.75rem] pointer-fine:border-[6px] pointer-fine:border-neutral-800 pointer-fine:shadow-2xl pointer-fine:shadow-black/60">
           <PrivacyProvider>
             <MarginModeProvider>
-              {/* overflow-x-hidden is load-bearing, not decorative: per the CSS
-                  spec, pairing overflow-y:auto with an overflow-x left at
-                  "visible" forces overflow-x to compute as "auto" too. That
-                  made SwipeNav's isInsideHorizontalScroller() check (which
-                  looks for overflowX === "auto"/"scroll" while walking up
-                  from the touch target) treat this whole container as a
-                  horizontal scroller on any page whose content is even a
-                  few px wider than the viewport — which killed swipe-away
-                  entirely on Brief (its tables/heatmap run wide) while
-                  leaving narrower pages unaffected. Pinning overflow-x to
-                  hidden here stops that computed value from ever becoming
-                  "auto" in the first place. */}
+              {/* overflow-x-hidden: prevents any accidental horizontal
+                  scroll/bounce if a table or chart ever runs a few px wider
+                  than the viewport (Brief's tables/heatmap are the usual
+                  suspect). No longer load-bearing for swipe-to-change-tabs —
+                  that gesture now lives on BottomNav instead of this
+                  container, see SwipeNav.tsx's useSwipeGesture — but still
+                  good hygiene to keep. */}
               <SwipeNav className="mx-auto min-h-0 w-full max-w-md flex-1 overflow-y-auto overflow-x-hidden md:max-w-4xl lg:max-w-6xl pointer-fine:max-w-md">
                 {children}
               </SwipeNav>
