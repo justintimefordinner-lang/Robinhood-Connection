@@ -21,6 +21,15 @@ function annClass(v: number | null | undefined): string {
   if (v >= 20) return "text-emerald-400";
   return "text-muted";
 }
+function bbSigmaClass(v: number | null | undefined): string {
+  // More negative = further below the 20-day range = deeper OTM = more
+  // cushion for a put seller; near/above 0 means the strike sits inside or
+  // above the recent trading range.
+  if (v == null) return "text-muted";
+  if (v <= -1) return "text-emerald-300";
+  if (v <= 0) return "text-amber-300";
+  return "text-rose-300";
+}
 function timeOnly(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -115,9 +124,10 @@ function BoardRow({ row }: { row: AmBoardRow }) {
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted/80">
                 Put ladder{row.ladder[0] ? ` · ${row.ladder[0].exp} · ${row.ladder[0].dte}d` : ""}
               </div>
-              <div className="grid grid-cols-[2.2rem_1fr_1fr_1fr_1fr_1.3fr] gap-x-2 text-[11px]">
+              <div className="grid grid-cols-[2.2rem_1fr_1fr_1fr_1fr_1fr_1.3fr] gap-x-2 text-[11px]">
                 <span className="text-[9px] uppercase text-muted/70">Δ</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Strike</span>
+                <span className="text-right text-[9px] uppercase text-muted/70">BBσ</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Buffer%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Prem%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Ann%</span>
@@ -126,6 +136,9 @@ function BoardRow({ row }: { row: AmBoardRow }) {
                   <Fragment key={L.dTarget}>
                     <span className="font-medium text-text">{L.dTarget}Δ</span>
                     <span className="tabular text-right text-text">${L.strike}</span>
+                    <span className={`tabular text-right ${bbSigmaClass(L.bbSigma)}`}>
+                      {L.bbSigma != null ? `${L.bbSigma >= 0 ? "+" : ""}${L.bbSigma.toFixed(1)}` : "—"}
+                    </span>
                     <span className="tabular text-right text-muted">
                       {row.last ? `${(((row.last - L.strike) / row.last) * 100).toFixed(1)}%` : "—"}
                     </span>
@@ -135,6 +148,9 @@ function BoardRow({ row }: { row: AmBoardRow }) {
                   </Fragment>
                 ))}
               </div>
+              <p className="mt-1 text-[9px] leading-relaxed text-muted/60">
+                BBσ = strike&apos;s std-devs from the 20-day mean · −2 = lower Bollinger band (deeper = further OTM)
+              </p>
             </div>
           )}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border/60 pt-2 text-[11px] text-muted">
