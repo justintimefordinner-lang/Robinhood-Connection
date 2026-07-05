@@ -68,6 +68,41 @@ def _run(label: str, fn) -> tuple[float, object]:
     return time.time() - start, result
 
 
+_ENV_KEY_FOR_LABEL = {
+    "app": "APP_PUSH_INTERVAL",
+    "research": "RESEARCH_PUSH_INTERVAL",
+    "am_report": "AM_REPORT_PUSH_INTERVAL",
+    "am_ladder": "AM_LADDER_PUSH_INTERVAL",
+}
+
+
+def _reload_intervals(targets: list[list]) -> None:
+    """Re-read *_PUSH_INTERVAL from .env and apply any change to already-
+    running targets, so interval edits made via the app's Settings page take
+    effect without restarting this process (auto_push.py is meant to run for
+    days at a time under systemd/pm2 — requiring a restart for a cadence
+    tweak would defeat the point of exposing it as a live setting).
+
+    Only adjusts targets that were already enabled at startup (interval > 0
+    in the targets list built in main()). Flipping a target from disabled to
+    enabled — or the reverse — still needs a restart, since a disabled
+    target's module was never imported and isn't in `targets` to begin with.
+    A changed interval takes effect starting with that target's *next*
+    scheduled run, not immediately, since we intentionally leave next_run
+    alone here rather than forcing an early re-run just because the interval
+    changed."""
+    load_dotenv(override=True)
+    for t in targets:
+        label = t[0]
+        env_key = _ENV_KEY_FOR_LABEL.get(label)
+        if not env_key:
+            continue
+        new_interval = _interval(env_key, t[2])
+        if new_interval > 0 and new_interval != t[2]:
+            _log(f"{label}: interval changed {t[2]}s -> {new_interval}s (picked up from .env)")
+            t[2] = new_interval
+
+
 def main() -> None:
     app_interval = _interval("APP_PUSH_INTERVAL", 60)
     research_interval = _interval("RESEARCH_PUSH_INTERVAL", 900)
@@ -99,6 +134,7 @@ def main() -> None:
     try:
         while True:
             now = time.time()
+            _reload_intervals(targets)
             for t in targets:
                 label, fn, interval, next_run = t
                 if now >= next_run:
