@@ -304,12 +304,12 @@ def get_price_history(rh, symbol: str, days: int = 400) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 def get_option_chain(
     rh, symbol: str, days: int = 45, strike_count: int = 8, puts_only: bool = False,
-    throttle_sec: float = 0.2, put_pct_band: tuple[float, float] = (3.0, 20.0),
+    throttle_sec: float = 0.2, put_pct_band: tuple[float, float] = (3.0, 25.0),
 ) -> dict[str, Any] | None:
     """`put_pct_band` pre-filters PUT strikes to a %-below-spot price window before
     spending any per-strike API calls, instead of just grabbing the `strike_count`
     strikes nearest the money. Delta isn't known until after a strike's quote comes
-    back, so this is a price-based proxy for it — the default (3%-20% OTM) is wide
+    back, so this is a price-based proxy for it — the default (3%-25% OTM) is wide
     enough to bracket the -0.15..-0.30 delta zone that both the CSP screen's gate
     (_put_at_delta, target 0.30) and the display ladder (put_ladder, centered on
     20-delta) actually use, across most IV regimes, while skipping the near-ATM/ITM
@@ -360,15 +360,21 @@ def get_option_chain(
     if spot is not None:
         lo_pct, hi_pct = put_pct_band
         band_lo, band_hi = spot * (1 - hi_pct / 100), spot * (1 - lo_pct / 100)
-        put_strikes = [k for k in all_strikes if band_lo <= k <= band_hi]
+        put_strikes = sorted(k for k in all_strikes if band_lo <= k <= band_hi)
         if not put_strikes:
             # Strike spacing on this name is wider than the band (e.g. a $10-wide
             # chain) — fall back to the strikes nearest a ~10%-OTM anchor so the
             # ladder isn't empty.
             anchor = spot * 0.90
             put_strikes = sorted(all_strikes, key=lambda k: abs(k - anchor))[:strike_count]
-        else:
-            put_strikes = sorted(put_strikes, key=lambda k: abs(k - spot))[:strike_count]
+        elif len(put_strikes) > strike_count:
+            # Spread evenly across the whole band (near-money -> far-OTM)
+            # instead of taking the strikes nearest spot, which would cluster
+            # everything at the near end and miss the ~20-delta strikes that
+            # sit further out on higher-beta/higher-IV names.
+            n = len(put_strikes)
+            idxs = sorted({round(i * (n - 1) / (strike_count - 1)) for i in range(strike_count)})
+            put_strikes = [put_strikes[i] for i in idxs]
     else:
         put_strikes = all_strikes[:strike_count]
 

@@ -56,7 +56,7 @@ python sync_trade_history.py        # run separately, once a day (see its docstr
   chain in one HTTP call; Robinhood's retail API needs one call per strike.
   `robinhood_client.get_option_chain()` narrows this to a single expiration,
   and for puts, a %-OTM price band aimed at the -0.15..-0.30 delta zone the
-  screen/gate actually use (`put_pct_band`, default 3%-20% OTM) instead of
+  screen/gate actually use (`put_pct_band`, default 3%-25% OTM) instead of
   just the strikes nearest the money — see that function's docstring. Still,
   a full Morning Brief run across ~56 approved names adds up. Trim your
   approved roster (`data/approved-stocks.json`), or tighten `strike_count`/

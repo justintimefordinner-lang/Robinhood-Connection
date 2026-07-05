@@ -288,15 +288,14 @@ def _put_at_delta(strikes: dict, target: float) -> dict | None:
 
 
 def put_ladder(chain: dict) -> list[dict]:
-    """Five real strikes from the actual ~30-DTE put chain, centered on the
-    20-delta line: the two nearest strikes with delta > 20 (closest to 20 from
-    above), then three strikes at-or-under 20-delta (closest available at/under
-    20, then the next two further out). Each leg reports its own observed
-    delta to 1 decimal (e.g. 24.3) rather than snapping to a fixed 30/25/20
-    target, so distinct strikes never collapse into duplicate rows on a
-    coarse/thin chain. Display only — the entry gate uses its own dedicated
-    30-delta lookup (_put_at_delta directly), so this doesn't touch tiering or
-    scoring."""
+    """Five real strikes from the actual ~30-DTE put chain: the strike whose
+    delta is closest to 20 (the anchor), plus the 2 nearest strikes with a
+    higher delta and the 2 nearest with a lower delta. Each leg reports its
+    own observed delta to 1 decimal (e.g. 24.3) rather than snapping to a
+    fixed 30/25/20 target, so distinct strikes never collapse into duplicate
+    rows on a coarse/thin chain. Display only — the entry gate uses its own
+    dedicated 30-delta lookup (_put_at_delta directly), so this doesn't touch
+    tiering or scoring."""
     from datetime import date
     pmap = chain.get("putExpDateMap") or {}
     exp = _near_monthly_exp(pmap)
@@ -314,9 +313,9 @@ def put_ladder(chain: dict) -> list[dict]:
         candidates.append((float(strike), abs(dl), c))
     if not candidates:
         return []
-    candidates.sort(key=lambda t: t[1], reverse=True)  # ITM (~1) -> deep OTM (~0)
-    cross = next((i for i, (_, dl, _) in enumerate(candidates) if dl <= 0.20), len(candidates))
-    selected = candidates[max(0, cross - 2):cross] + candidates[cross:cross + 3]
+    candidates.sort(key=lambda t: t[1], reverse=True)  # ITM (~1) -> deep OTM (~0), so index order = higher delta -> lower delta
+    anchor = min(range(len(candidates)), key=lambda i: abs(candidates[i][1] * 100 - 20))
+    selected = candidates[max(0, anchor - 2):anchor] + [candidates[anchor]] + candidates[anchor + 1:anchor + 3]
 
     legs = []
     for strike, dl, c in selected:
@@ -449,6 +448,11 @@ def screen(sym: str, candles: list[dict], spy: list[float], chain: dict | None,
     pmap = (chain.get("putExpDateMap") or {}) if chain else {}
     gate_exp = _near_monthly_exp(pmap) if pmap else None
     put = _put_at_delta(pmap[gate_exp], 0.30) if gate_exp else None    # dedicated 30Δ gate reference, independent of the display ladder
+    if put and gate_exp:
+        exp_label = gate_exp.split(":")[0]
+        put["exp"] = exp_label
+        put["dte"] = (date.fromisoformat(exp_label) - today).days
+        put["annPct"] = round(put["premPct"] * 365 / put["dte"], 1) if put["dte"] > 0 else None
     ladder = put_ladder(chain) if chain else []    # display ladder (5 rungs) for this row's own output, e.g. the screener
     if not put:
         fails.append("no 30D/30Δ chain")

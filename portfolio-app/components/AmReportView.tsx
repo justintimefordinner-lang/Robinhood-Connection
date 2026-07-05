@@ -113,11 +113,12 @@ function BoardRow({ row }: { row: AmBoardRow }) {
           {row.ladder.length > 0 && (
             <div className="mb-2">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted/80">
-                Put ladder{c ? ` · ${c.exp} · ${c.dte}d` : ""}
+                Put ladder{row.ladder[0] ? ` · ${row.ladder[0].exp} · ${row.ladder[0].dte}d` : ""}
               </div>
-              <div className="grid grid-cols-[2.2rem_1fr_1fr_1fr_1.3fr] gap-x-2 text-[11px]">
+              <div className="grid grid-cols-[2.2rem_1fr_1fr_1fr_1fr_1.3fr] gap-x-2 text-[11px]">
                 <span className="text-[9px] uppercase text-muted/70">Δ</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Strike</span>
+                <span className="text-right text-[9px] uppercase text-muted/70">Buffer%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Prem%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Ann%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">OI</span>
@@ -125,6 +126,9 @@ function BoardRow({ row }: { row: AmBoardRow }) {
                   <Fragment key={L.dTarget}>
                     <span className="font-medium text-text">{L.dTarget}Δ</span>
                     <span className="tabular text-right text-text">${L.strike}</span>
+                    <span className="tabular text-right text-muted">
+                      {row.last ? `${(((row.last - L.strike) / row.last) * 100).toFixed(1)}%` : "—"}
+                    </span>
                     <span className="tabular text-right text-text">{L.premPct.toFixed(2)}</span>
                     <span className={`tabular text-right ${annClass(L.annPct)}`}>{L.annPct != null ? L.annPct.toFixed(1) : "—"}</span>
                     <span className="tabular text-right text-muted">{L.oi.toLocaleString()}</span>
