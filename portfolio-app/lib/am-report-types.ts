@@ -34,6 +34,7 @@ export interface AmLadderLeg {
   spreadPct: number;
   dte: number;
   exp: string;
+  bbSigma: number | null;
 }
 
 export interface AmGamma {
