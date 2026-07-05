@@ -103,15 +103,16 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
 
   return (
     <div
-      // touch-pan-y: this container now scrolls vertically on its own (not
-      // the document) on any page tall enough to need it — Brief being the
-      // main one. Without this, the browser is free to interpret an
-      // ambiguous/fast horizontal drag as the start of a native vertical
-      // scroll and hijack the touch sequence (often delivering touchcancel
-      // instead of touchend, so the swipe below never gets detected).
-      // touch-action: pan-y tells it to only ever claim vertical gestures
-      // natively here, leaving horizontal drags entirely to this handler.
-      className={`touch-pan-y ${className ?? ""}`}
+      // NOTE: deliberately no touch-action override here (leave it "auto").
+      // A pan-y restriction was tried here to stop the browser from ever
+      // claiming a horizontal drag as native scroll, but it interacts badly
+      // with this element's own overflow-y:auto on some mobile browsers —
+      // it can suppress vertical scrolling entirely (especially slow,
+      // controlled drags rather than fast flicks). The real fix for
+      // swipe-away not working was overflow-x-hidden below (see layout.tsx
+      // for why), which doesn't touch scrolling at all — so this doesn't
+      // need touch-action to also do its job.
+      className={className}
       onTouchStart={(e) => {
         const t = e.touches[0];
         start.current = {
