@@ -4,8 +4,11 @@ import type { Account } from "./types";
 
 export const ACCOUNT_COOKIE = "account";
 
-/** Display label for an account, e.g. "Agentic" or "Individual". */
+/** Display label for an account, e.g. "Agentic" or "Traditional IRA". */
 export function accountLabel(a: Account): string {
   if (a.nickname) return a.nickname;
-  return a.brokerageType.charAt(0).toUpperCase() + a.brokerageType.slice(1);
+  return a.brokerageType
+    .split(" ")
+    .map((word) => (word.toLowerCase() === "ira" ? "IRA" : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(" ");
 }

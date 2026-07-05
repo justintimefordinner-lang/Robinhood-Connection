@@ -286,7 +286,7 @@ def main() -> None:
             "id": acct_id,
             "mask": f"\u2022\u2022\u2022\u2022{last4}",
             "type": (snap.get("account_type") or "margin").lower(),
-            "brokerageType": "individual",
+            "brokerageType": acct.get("robinhoodType") or "individual",
             "isDefault": i == 0,
         })
         data_by_account[acct_id] = build_account_data(rh, snap, points)
