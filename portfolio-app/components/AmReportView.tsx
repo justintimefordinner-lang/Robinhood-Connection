@@ -94,23 +94,22 @@ function BoardRow({ row }: { row: AmBoardRow }) {
   const c = row.chain;
   return (
     <div className="px-3 py-2.5">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 text-left">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center text-left">
         <span className={`tabular w-7 shrink-0 rounded px-1 py-0.5 text-center text-[11px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
           {row.tier}
         </span>
-        <span className="w-12 shrink-0 text-sm font-semibold">{row.sym}</span>
-        <span className="tabular w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
+        <span className="ml-2 w-12 shrink-0 text-sm font-semibold">{row.sym}</span>
+        <span className="tabular ml-2 w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
         {row.erSpansPut && (
-          <span className="shrink-0 rounded bg-amber-500/25 px-1 py-0.5 text-[8px] font-bold uppercase text-amber-200" title="put spans earnings">
+          <span className="ml-1 shrink-0 rounded bg-amber-500/25 px-1 py-0.5 text-[8px] font-bold uppercase text-amber-200" title="put spans earnings">
             ER{row.erDays != null ? ` ${row.erDays}d` : ""}
           </span>
         )}
-        <span className="tabular w-7 shrink-0 text-[11px] text-muted">{Math.round(row.score)}</span>
-        <span className={`w-8 shrink-0 text-[11px] font-medium ${VRP_STYLE[row.vrp]}`}>{row.vrp}</span>
-        <span className="flex-1" />
-        <span className="tabular w-11 shrink-0 text-right text-[11px] text-muted">{c ? `${c.premPct.toFixed(2)}%` : "—"}</span>
-        <span className={`tabular w-12 shrink-0 text-right text-[11px] ${annClass(c?.annPct)}`}>{c?.annPct != null ? `${c.annPct.toFixed(1)}%` : "—"}</span>
-        <span className="tabular w-14 shrink-0 text-right text-[11px] text-muted">{g?.putWall != null ? `$${g.putWall}` : "—"}</span>
+        <span className="tabular ml-1.5 w-7 shrink-0 text-[11px] text-muted">{Math.round(row.score)}</span>
+        <span className={`ml-1.5 w-8 shrink-0 text-[11px] font-medium ${VRP_STYLE[row.vrp]}`}>{row.vrp}</span>
+        <span className="tabular ml-1 w-11 shrink-0 text-right text-[11px] text-muted">{c ? `${c.premPct.toFixed(2)}%` : "—"}</span>
+        <span className={`tabular ml-1.5 w-12 shrink-0 text-right text-[11px] ${annClass(c?.annPct)}`}>{c?.annPct != null ? `${c.annPct.toFixed(1)}%` : "—"}</span>
+        <span className="tabular ml-2 w-14 shrink-0 text-right text-[11px] text-muted">{g?.putWall != null ? `$${g.putWall}` : "—"}</span>
       </button>
       {open && (
         <div className="mt-2 rounded-lg bg-surface-2/50 px-3 py-2">
@@ -287,16 +286,15 @@ export function AmReportView({ report }: { report: AmReport }) {
         <Card className="px-4 py-5 text-center text-sm text-muted">No names cleared the gates today.</Card>
       ) : (
         <Card className="divide-y divide-border p-0">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
+          <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
             <span className="w-7 shrink-0 text-center">Tier</span>
-            <span className="w-12 shrink-0">Tkr</span>
-            <span className="w-14 shrink-0">Price</span>
-            <span className="w-7 shrink-0">Scr</span>
-            <span className="w-8 shrink-0">VRP</span>
-            <span className="flex-1" />
-            <span className="w-11 shrink-0 text-right">30D%</span>
-            <span className="w-12 shrink-0 text-right">Ann%</span>
-            <span className="w-14 shrink-0 text-right">P-Wall</span>
+            <span className="ml-2 w-12 shrink-0">Tkr</span>
+            <span className="ml-2 w-14 shrink-0">Price</span>
+            <span className="ml-1.5 w-7 shrink-0">Scr</span>
+            <span className="ml-1.5 w-8 shrink-0">VRP</span>
+            <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
+            <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
+            <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
           </div>
           {report.board.map((row) => (
             <BoardRow key={row.sym} row={row} />
