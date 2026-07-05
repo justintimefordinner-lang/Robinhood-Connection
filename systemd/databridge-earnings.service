@@ -1,0 +1,9 @@
+[Unit]
+Description=Robinhood bridge - daily earnings-date refresh
+Wants=databridge-history.service
+
+[Service]
+Type=oneshot
+User=jimmydaux
+WorkingDirectory=/home/jimmydaux/JerStock/databridge
+ExecStart=/home/jimmydaux/JerStock/databridge/.venv/bin/python fetch_earnings.py

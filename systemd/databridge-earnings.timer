@@ -1,0 +1,14 @@
+[Unit]
+Description=Run databridge-earnings.service daily after the trade-history sync
+
+[Timer]
+# 4:20pm ET is 20:20 UTC during EDT (summer) / 21:20 UTC during EST (winter).
+# systemd doesn't know about ET DST, so this uses UTC; adjust OnCalendar below
+# twice a year, or point it at America/New_York if your Pi's timezone is set
+# to ET (then just use 16:20 local time instead). 5 minutes after
+# databridge-history so it doesn't race the trade-history sync for CPU.
+OnCalendar=Mon..Fri 20:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

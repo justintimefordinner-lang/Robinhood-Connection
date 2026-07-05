@@ -44,5 +44,20 @@ module.exports = {
       autorestart: false,
       cron_restart: "15 20 * * 1-5",
     },
+    {
+      // Daily next-earnings-date refresh for the CSP board's earnings gate
+      // (am_report.py reads data/earnings.json and flags names with earnings
+      // inside the "landmine" window). Earnings dates change rarely — once a
+      // day, a few minutes after the trade-history sync, is plenty; this is
+      // deliberately NOT part of auto_push.py's per-minute loop. Same
+      // stopped-in-between pattern as databridge-history above.
+      name: "databridge-earnings",
+      cwd: "/home/jimmydaux/JerStock/databridge",
+      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
+      args: "fetch_earnings.py",
+      interpreter: "none",
+      autorestart: false,
+      cron_restart: "20 20 * * 1-5",
+    },
   ],
 };
