@@ -49,6 +49,11 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
   const pathname = usePathname();
   const [, startTransition] = useTransition();
   const start = useRef<{ x: number; y: number; t: number; skip: boolean } | null>(null);
+  // Continuously updated during the gesture so a touchcancel (which some
+  // browsers fire instead of touchend once they decide to hand a touch off
+  // to native scrolling) still has a last-known position to finish with,
+  // instead of silently dropping the swipe.
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
 
   function navigate(path: string, direction: "left" | "right") {
     const doc = document as ViewTransitionDocument;
@@ -76,9 +81,37 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
     });
   }
 
+  function finish(x: number, y: number) {
+    const s = start.current;
+    start.current = null;
+    lastPos.current = null;
+    if (!s || s.skip) return;
+
+    const dx = x - s.x;
+    const dy = y - s.y;
+    const dt = Date.now() - s.t;
+    if (Math.abs(dx) < MIN_DISTANCE_PX) return;
+    if (Math.abs(dx) < Math.abs(dy) * HORIZONTAL_BIAS) return;
+    if (dt > MAX_DURATION_MS) return;
+
+    const idx = currentTabIndex(pathname);
+    if (idx === -1) return;
+    const nextIdx = dx < 0 ? idx + 1 : idx - 1; // swipe left -> next tab, swipe right -> previous
+    if (nextIdx < 0 || nextIdx >= TAB_ORDER.length) return;
+    navigate(TAB_ORDER[nextIdx], dx < 0 ? "left" : "right");
+  }
+
   return (
     <div
-      className={className}
+      // touch-pan-y: this container now scrolls vertically on its own (not
+      // the document) on any page tall enough to need it — Brief being the
+      // main one. Without this, the browser is free to interpret an
+      // ambiguous/fast horizontal drag as the start of a native vertical
+      // scroll and hijack the touch sequence (often delivering touchcancel
+      // instead of touchend, so the swipe below never gets detected).
+      // touch-action: pan-y tells it to only ever claim vertical gestures
+      // natively here, leaving horizontal drags entirely to this handler.
+      className={`touch-pan-y ${className ?? ""}`}
       onTouchStart={(e) => {
         const t = e.touches[0];
         start.current = {
@@ -87,25 +120,20 @@ export function SwipeNav({ children, className }: { children: ReactNode; classNa
           t: Date.now(),
           skip: isInsideHorizontalScroller(e.target),
         };
+        lastPos.current = { x: t.clientX, y: t.clientY };
+      }}
+      onTouchMove={(e) => {
+        const t = e.touches[0];
+        if (t) lastPos.current = { x: t.clientX, y: t.clientY };
       }}
       onTouchEnd={(e) => {
-        const s = start.current;
-        start.current = null;
-        if (!s || s.skip) return;
-
         const t = e.changedTouches[0];
-        const dx = t.clientX - s.x;
-        const dy = t.clientY - s.y;
-        const dt = Date.now() - s.t;
-        if (Math.abs(dx) < MIN_DISTANCE_PX) return;
-        if (Math.abs(dx) < Math.abs(dy) * HORIZONTAL_BIAS) return;
-        if (dt > MAX_DURATION_MS) return;
-
-        const idx = currentTabIndex(pathname);
-        if (idx === -1) return;
-        const nextIdx = dx < 0 ? idx + 1 : idx - 1; // swipe left -> next tab, swipe right -> previous
-        if (nextIdx < 0 || nextIdx >= TAB_ORDER.length) return;
-        navigate(TAB_ORDER[nextIdx], dx < 0 ? "left" : "right");
+        finish(t.clientX, t.clientY);
+      }}
+      onTouchCancel={() => {
+        // Fall back to the last position seen before the browser cancelled
+        // the sequence, rather than dropping the gesture entirely.
+        if (lastPos.current) finish(lastPos.current.x, lastPos.current.y);
       }}
     >
       {children}
