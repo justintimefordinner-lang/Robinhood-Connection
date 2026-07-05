@@ -114,16 +114,24 @@ def get_option_order_records(rh) -> dict[str, list[dict[str, Any]]]:
             instrument = _instrument(rh, option_id, cache) if option_id else {}
             qty = float(leg.get("ratio_quantity") or 1) * processed_qty
             price = o.get("processed_premium")
-            # processed_premium is per-order (all legs); for the common single-leg
-            # CSP/covered-call/LEAP case that's exactly the per-contract total. For
-            # multi-leg spreads this is a simplification — the spread-detection path
-            # in closed_trades.py still works off strike/expiration/side, just the
-            # per-leg fill price used in the P&L math may be less precise than
-            # Schwab's true per-leg execution price.
+            # processed_premium is Robinhood's TOTAL dollar amount for the whole
+            # order (all legs, all contracts) — e.g. "Est credit" in the app,
+            # not a per-share price. processed_qty counts CONTRACTS, and each
+            # contract is 100 shares, so getting back to a true per-share price
+            # (what closed_trades.py's *100*qty math expects) needs dividing by
+            # both the contract count AND the 100-share multiplier. Dividing by
+            # processed_qty alone left this 100x too high, which closed_trades.py
+            # then multiplied by 100 again — a clean 100x overstatement on every
+            # realized P&L figure. For multi-leg spreads this per-share figure is
+            # still a simplification (processed_premium isn't split per leg) —
+            # the spread-detection path in closed_trades.py works off
+            # strike/expiration/side regardless, just the per-leg fill price used
+            # in the P&L math may be less precise than a true per-leg execution
+            # price.
             per_share = None
             if price is not None and processed_qty:
                 try:
-                    per_share = abs(float(price)) / processed_qty
+                    per_share = abs(float(price)) / (processed_qty * 100)
                 except (TypeError, ZeroDivisionError):
                     per_share = None
             legs_out.append({
