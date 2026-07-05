@@ -9,4 +9,4 @@ next-env.d.ts
 !.env.example
 .DS_Store
 # real account data — bridge writes here locally; never committed
-/data/*.json
+#/data/*.json
