@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       // Next.js dashboard — always-on, restarts on crash.
-      // Was: systemd/portfolio-app.service
-      name: "portfolio-app",
-      cwd: "/home/jimmydaux/JerStock/portfolio-app",
+      // Was: systemd/appfiles.service
+      name: "appfiles",
+      cwd: "/home/jimmydaux/JerStock/appfiles",
       script: "npm",
       args: "start",
       env: {
@@ -18,17 +18,12 @@ module.exports = {
       // auto_push.py scheduler loop — the same process that already calls
       // am_report.main() every 30 min and refresh_ladders() more often.
       // Always-on, restarts on crash.
-      // Was: systemd/robinhood-bridge.service
-      name: "robinhood-bridge",
-      cwd: "/home/jimmydaux/JerStock/robinhood-bridge",
-      script: "/home/jimmydaux/JerStock/robinhood-bridge/.venv/bin/python",
+      // Was: systemd/databridge.service
+      name: "databridge",
+      cwd: "/home/jimmydaux/JerStock/databridge",
+      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
       args: "auto_push.py",
       interpreter: "none", // script IS the interpreter binary; don't let pm2 wrap it again
-      env: {
-        PYTHONUNBUFFERED: "1", // otherwise a long-running loop's print() output
-                                // sits in Python's internal buffer forever and
-                                // never reaches pm2's logs
-      },
       autorestart: true,
       restart_delay: 15000, // matches the old RestartSec=15
     },
@@ -40,15 +35,12 @@ module.exports = {
       // looping it. NOTE: unlike the old timer, this has no `Persistent=true`
       // equivalent — if the Pi happens to be off/rebooting at 20:15, this
       // won't "catch up" on the next boot the way the systemd timer did.
-      // Was: systemd/robinhood-history.service + robinhood-history.timer
-      name: "robinhood-history",
-      cwd: "/home/jimmydaux/JerStock/robinhood-bridge",
-      script: "/home/jimmydaux/JerStock/robinhood-bridge/.venv/bin/python",
+      // Was: systemd/databridge-history.service + databridge-history.timer
+      name: "databridge-history",
+      cwd: "/home/jimmydaux/JerStock/databridge",
+      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
       args: "sync_trade_history.py",
       interpreter: "none",
-      env: {
-        PYTHONUNBUFFERED: "1",
-      },
       autorestart: false,
       cron_restart: "15 20 * * 1-5",
     },

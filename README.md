@@ -3,9 +3,9 @@
 A self-hosted options-wheel trading dashboard. Two independent halves that talk
 only through a folder of JSON files on disk:
 
-- **`portfolio-app/`** — a Next.js 16 dashboard (Home, Options, Stocks, P&L,
+- **`appfiles/`** — a Next.js 16 dashboard (Home, Options, Stocks, P&L,
   VIX, Morning Brief, Research). This is what you see.
-- **`robinhood-bridge/`** — a Python program that reads your Robinhood
+- **`databridge/`** — a Python program that reads your Robinhood
   account + public market data and writes the JSON the app renders. This is
   read-only; it can't trade.
 
@@ -14,7 +14,7 @@ only through a folder of JSON files on disk:
 ## See the dashboard in 60 seconds (no Robinhood account needed)
 
 ```bash
-cd portfolio-app
+cd appfiles
 npm install
 npm run dev
 ```
@@ -27,9 +27,9 @@ the fastest way to see exactly how it looks and behaves.
 
 ## Wire it to your real account
 
-1. Set up `robinhood-bridge/` (see its README) and create your `.env` from
+1. Set up `databridge/` (see its README) and create your `.env` from
    `.env.example`.
-2. Point the bridge's `APP_DATA_DIR` at **`portfolio-app/data/`**.
+2. Point the bridge's `APP_DATA_DIR` at **`appfiles/data/`**.
 3. Run `python auto_push.py` (live snapshot/research/Morning Brief on a
    schedule) and, separately, `python sync_trade_history.py` once a day for
    closed-trade history — the app will render your live positions.
@@ -49,9 +49,9 @@ This repo is structured so secrets **cannot** ride along, but it's on you to kee
 it that way:
 
 - **Never commit** `.env` or any Robinhood session/token cache. `.env` is
-  gitignored at the root and in `robinhood-bridge/`. Your Robinhood
+  gitignored at the root and in `databridge/`. Your Robinhood
   credentials live only in your local `.env`.
-- `portfolio-app/data/*.json` (your real holdings) is gitignored too — only the
+- `appfiles/data/*.json` (your real holdings) is gitignored too — only the
   synthetic Example dataset is in the code.
 - If you fork this **public**, double-check `git status` shows none of the above
   before your first push.
@@ -62,5 +62,5 @@ it that way:
 
 - Personal project, provided as-is. Not financial advice.
 - Robinhood access goes through [`robin_stocks`](https://github.com/jmfernandes/robin_stocks),
-  an unofficial library — see `robinhood-bridge/README.md` for its known gaps
+  an unofficial library — see `databridge/README.md` for its known gaps
   and rate-limit considerations before relying on this for anything time-sensitive.

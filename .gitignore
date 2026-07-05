@@ -30,7 +30,7 @@ build/
 next-env.d.ts
 
 # ===== Real account data (the bridge writes these locally) =====
-portfolio-app/data/*.json
+appfiles/data/*.json
 
 # ===== Misc / local =====
 .DS_Store

@@ -10,8 +10,8 @@ files in `systemd/` hardcode that path.
 
 ```
 /home/pi/JerStock/
-├── portfolio-app/
-└── robinhood-bridge/
+├── appfiles/
+└── databridge/
 ```
 
 (If you still have a `schwab-bridge/` folder from an earlier setup, you can
@@ -51,10 +51,10 @@ doesn't hurt.
 
 ---
 
-## 2. Dashboard (`portfolio-app/`)
+## 2. Dashboard (`appfiles/`)
 
 ```bash
-cd /home/pi/JerStock/portfolio-app
+cd /home/pi/JerStock/appfiles
 npm install
 npm run build     # the step swap matters for; give it a few minutes
 npm run start      # quick manual check before wiring up systemd
@@ -65,28 +65,28 @@ Visit `http://<pi-ip>:3000` from another machine on your LAN.
 **Run as a service:**
 
 ```bash
-sudo cp systemd/portfolio-app.service /etc/systemd/system/
+sudo cp systemd/appfiles.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now portfolio-app
-journalctl -u portfolio-app -f
+sudo systemctl enable --now appfiles
+journalctl -u appfiles -f
 ```
 
 Rebuilding after code changes: `npm run build` then
-`sudo systemctl restart portfolio-app`.
+`sudo systemctl restart appfiles`.
 
 ---
 
-## 3. Robinhood bridge (`robinhood-bridge/`)
+## 3. Robinhood bridge (`databridge/`)
 
 ```bash
-cd /home/pi/JerStock/robinhood-bridge
+cd /home/pi/JerStock/databridge
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
 nano .env   # fill in ROBINHOOD_USERNAME / ROBINHOOD_PASSWORD, and:
-            # APP_DATA_DIR=/home/pi/JerStock/portfolio-app/data
+            # APP_DATA_DIR=/home/pi/JerStock/appfiles/data
 ```
 
 **First-time auth**, interactively over SSH:
@@ -102,13 +102,13 @@ code when the session eventually expires), set `ROBINHOOD_TOTP_SECRET` in
 Robinhood's security settings.
 
 **Run the live-data loop as a service** (app snapshot + research + Morning
-Brief + ladder refresh, each on its own timer — see `robinhood-bridge/README.md`):
+Brief + ladder refresh, each on its own timer — see `databridge/README.md`):
 
 ```bash
-sudo cp ../systemd/robinhood-bridge.service /etc/systemd/system/
+sudo cp ../systemd/databridge.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now robinhood-bridge
-journalctl -u robinhood-bridge -f
+sudo systemctl enable --now databridge
+journalctl -u databridge -f
 ```
 
 **Run the daily trade-history sync** as a separate timer (this one pulls
@@ -116,15 +116,15 @@ your full order history — fine once a day, not something to run every
 minute):
 
 ```bash
-sudo cp ../systemd/robinhood-history.service /etc/systemd/system/
-sudo cp ../systemd/robinhood-history.timer /etc/systemd/system/
+sudo cp ../systemd/databridge-history.service /etc/systemd/system/
+sudo cp ../systemd/databridge-history.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now robinhood-history.timer
-systemctl list-timers robinhood-history.timer   # confirm next run time
+sudo systemctl enable --now databridge-history.timer
+systemctl list-timers databridge-history.timer   # confirm next run time
 ```
 
 > The timer's `OnCalendar` is in UTC and doesn't auto-adjust for ET
-> daylight saving — see the comment in `systemd/robinhood-history.timer`.
+> daylight saving — see the comment in `systemd/databridge-history.timer`.
 > Simplest fix: set the Pi's own timezone to America/New_York
 > (`sudo raspi-config` → Localisation → Timezone) and change the schedule
 > to local time.
@@ -144,7 +144,7 @@ lighter footprint on a Pi:
 - Trim your approved roster (`data/approved-stocks.json`) — fewer names,
   fewer calls, linearly.
 - Lengthen `AM_REPORT_PUSH_INTERVAL` / `AM_LADDER_PUSH_INTERVAL` in
-  `robinhood-bridge/.env`.
+  `databridge/.env`.
 - See `robinhood_client.get_option_chain()`'s docstring for the specific
   tradeoffs it makes vs. the Schwab version.
 
@@ -186,10 +186,10 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## 6. Sanity-check checklist
 
-- [ ] `systemctl status portfolio-app` → active (running)
+- [ ] `systemctl status appfiles` → active (running)
 - [ ] `curl -s localhost:3000 | head` returns HTML
 - [ ] `data/snapshot.json` timestamp (`meta.generatedAt`) is recent
 - [ ] `data/am_report.json` exists and `meta.asOf` is recent (after a market-hours run)
-- [ ] `journalctl -u robinhood-bridge` shows no repeating auth or rate-limit errors
-- [ ] `systemctl list-timers robinhood-history.timer` shows a sane next-run time
+- [ ] `journalctl -u databridge` shows no repeating auth or rate-limit errors
+- [ ] `systemctl list-timers databridge-history.timer` shows a sane next-run time
 - [ ] Services come back up after `sudo reboot`

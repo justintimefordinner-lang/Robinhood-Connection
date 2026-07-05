@@ -1,8 +1,0 @@
-[Unit]
-Description=Robinhood bridge - daily trade history sync
-
-[Service]
-Type=oneshot
-User=jimmydaux
-WorkingDirectory=/home/jimmydaux/JerStock/robinhood-bridge
-ExecStart=/home/jimmydaux/JerStock/robinhood-bridge/.venv/bin/python sync_trade_history.py
