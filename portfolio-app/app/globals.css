@@ -29,15 +29,13 @@
 html {
   scroll-padding-top: 4.5rem;
   -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
 }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
-  /* keep content clear of the fixed bottom tab bar + iOS home indicator */
-  padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
-  overscroll-behavior-y: none;
 }
 
 /* Hide scrollbars on horizontal chip rows but keep scrollability */

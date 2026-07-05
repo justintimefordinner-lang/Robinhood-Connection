@@ -54,11 +54,14 @@ python sync_trade_history.py        # run separately, once a day (see its docstr
 
 - **Option-chain call volume.** Schwab serves an entire multi-expiration
   chain in one HTTP call; Robinhood's retail API needs one call per strike.
-  `robinhood_client.get_option_chain()` narrows this to a single expiration
-  and a modest strike count to stay reasonable — see that function's
-  docstring. A full Morning Brief run across ~56 approved names is still
-  several hundred calls. Trim your approved roster (`data/approved-stocks.json`)
-  if this feels slow or you see errors that look like rate-limiting.
+  `robinhood_client.get_option_chain()` narrows this to a single expiration,
+  and for puts, a %-OTM price band aimed at the -0.15..-0.30 delta zone the
+  screen/gate actually use (`put_pct_band`, default 3%-20% OTM) instead of
+  just the strikes nearest the money — see that function's docstring. Still,
+  a full Morning Brief run across ~56 approved names adds up. Trim your
+  approved roster (`data/approved-stocks.json`), or tighten `strike_count`/
+  `put_pct_band`, if this feels slow or you see errors that look like
+  rate-limiting.
 - **Robinhood is an unofficial, undocumented API from `robin_stocks`'
   perspective.** Field names have shifted across versions before, and
   Robinhood can throttle or block unusual call volume without warning. If
