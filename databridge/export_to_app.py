@@ -274,6 +274,15 @@ def main() -> None:
     rh = rc.get_client()
     accounts = rc.list_accounts(rh)
     if not accounts:
+        # Empty result from a cached session most often means the session
+        # went stale (e.g. the ~24h token expired) rather than the account
+        # genuinely having zero accounts — force one fresh login and retry
+        # before giving up, so a long-running auto_push.py process can
+        # recover on its own instead of erroring every cycle until restarted.
+        print("No accounts on cached session — forcing a fresh login and retrying once...")
+        rh = rc.get_client(force=True)
+        accounts = rc.list_accounts(rh)
+    if not accounts:
         raise SystemExit("No Robinhood account found.")
 
     history = load_history(data_dir)

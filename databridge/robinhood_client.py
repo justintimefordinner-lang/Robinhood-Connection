@@ -59,10 +59,29 @@ class AuthError(RuntimeError):
     """Raised when login fails or credentials are missing."""
 
 
-def get_client():
+_cached_rh = None  # module-level so it's shared across every caller/import within one process
+
+
+def get_client(force: bool = False):
     """Log in and return the robin_stocks module itself (it's function-based,
     not object-based, so there's no separate client object — this just
-    centralizes the login call and env validation)."""
+    centralizes the login call and env validation).
+
+    Cached at module level after the first successful login. auto_push.py is
+    a long-running process that calls this every cycle (every 60s for the
+    app target alone, via export_to_app.main() -> get_client()) — without
+    caching, that meant a brand-new rh.login() call, a fresh TOTP code, and a
+    real request to Robinhood's auth endpoint every single cycle, all to get
+    a session that was already valid. Now login only actually runs once per
+    process; every other call just returns the same authenticated module.
+
+    Pass force=True to bypass the cache and force a fresh login — e.g. after
+    a call elsewhere fails with an auth-looking error and you want to retry
+    once with a new session rather than assuming the whole run is broken."""
+    global _cached_rh
+    if _cached_rh is not None and not force:
+        return _cached_rh
+
     if not _USERNAME or not _PASSWORD:
         raise AuthError(
             "Missing ROBINHOOD_USERNAME or ROBINHOOD_PASSWORD. "
@@ -85,6 +104,7 @@ def get_client():
     )
     if not login_result or not login_result.get("access_token"):
         raise AuthError("Robinhood login did not return an access token.")
+    _cached_rh = rh
     return rh
 
 
