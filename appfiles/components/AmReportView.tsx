@@ -292,22 +292,24 @@ export function AmReportView({ report }: { report: AmReport }) {
       {report.board.length === 0 ? (
         <Card className="px-4 py-5 text-center text-sm text-muted">No names cleared the gates today.</Card>
       ) : (
-        <Card className="divide-y divide-border p-0">
-          <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
-            <span className="w-5 shrink-0 text-center">Tier</span>
-            <span className="ml-2 w-12 shrink-0">Tkr</span>
-            <span className="ml-2 w-14 shrink-0">Price</span>
-            <span className="ml-1.5 w-7 shrink-0">Scr</span>
-            <span className="ml-1.5 w-8 shrink-0">VRP</span>
-            <span className="ml-1.5 w-7 shrink-0 text-center">ER</span>
-            <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
-            <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
-            <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
-          </div>
-          {report.board.map((row) => (
-            <BoardRow key={row.sym} row={row} />
-          ))}
-        </Card>
+        <div className="overflow-x-auto no-scrollbar -mx-0">
+          <Card className="min-w-max divide-y divide-border p-0">
+            <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
+              <span className="w-5 shrink-0 text-center">Tier</span>
+              <span className="ml-2 w-12 shrink-0">Tkr</span>
+              <span className="ml-2 w-14 shrink-0">Price</span>
+              <span className="ml-1.5 w-7 shrink-0">Scr</span>
+              <span className="ml-1.5 w-8 shrink-0">VRP</span>
+              <span className="ml-1.5 w-7 shrink-0 text-center">ER</span>
+              <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
+              <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
+              <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
+            </div>
+            {report.board.map((row) => (
+              <BoardRow key={row.sym} row={row} />
+            ))}
+          </Card>
+        </div>
       )}
 
       {report.meta.earningsLoaded === false && (
