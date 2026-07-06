@@ -88,6 +88,24 @@ function RegimeBanner({ r }: { r: AmReport["regime"] }) {
   );
 }
 
+// Shared column header for BoardRow, used both on the CSP board and inside
+// each expanded heat-map group (whose members render as BoardRows too).
+function BoardHeaderRow() {
+  return (
+    <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
+      <span className="w-5 shrink-0 text-center">Tier</span>
+      <span className="ml-2 w-12 shrink-0">Tkr</span>
+      <span className="ml-2 w-14 shrink-0">Price</span>
+      <span className="ml-1.5 w-7 shrink-0">Scr</span>
+      <span className="ml-1.5 w-8 shrink-0">VRP</span>
+      <span className="ml-1.5 w-7 shrink-0 text-center">ER</span>
+      <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
+      <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
+      <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
+    </div>
+  );
+}
+
 function BoardRow({ row }: { row: AmBoardRow }) {
   const [open, setOpen] = useState(false);
   const g = row.gamma;
@@ -195,6 +213,7 @@ function HeatGroup({ g }: { g: AmVrpGroup }) {
       </button>
       {open && (
         <div className="divide-y divide-border/50 border-t border-border/60 bg-surface-2/30">
+          <BoardHeaderRow />
           {g.members.map((m) => (
             <BoardRow key={m.sym} row={m} />
           ))}
@@ -294,17 +313,7 @@ export function AmReportView({ report }: { report: AmReport }) {
       ) : (
         <div className="overflow-x-auto no-scrollbar -mx-0">
           <Card className="min-w-max divide-y divide-border p-0">
-            <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
-              <span className="w-5 shrink-0 text-center">Tier</span>
-              <span className="ml-2 w-12 shrink-0">Tkr</span>
-              <span className="ml-2 w-14 shrink-0">Price</span>
-              <span className="ml-1.5 w-7 shrink-0">Scr</span>
-              <span className="ml-1.5 w-8 shrink-0">VRP</span>
-              <span className="ml-1.5 w-7 shrink-0 text-center">ER</span>
-              <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
-              <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
-              <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
-            </div>
+            <BoardHeaderRow />
             {report.board.map((row) => (
               <BoardRow key={row.sym} row={row} />
             ))}
@@ -341,11 +350,13 @@ export function AmReportView({ report }: { report: AmReport }) {
           <div>
             <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">Premium heat map</h3>
             <p className="mb-2 px-1 text-[10px] text-muted">Where premium is actually fat — VRP (IV vs realized) by group · tap a group for its names</p>
-            <Card className="divide-y divide-border p-0">
-              {report.vrpGroups.map((g) => (
-                <HeatGroup key={g.group} g={g} />
-              ))}
-            </Card>
+            <div className="overflow-x-auto no-scrollbar">
+              <Card className="min-w-max divide-y divide-border p-0">
+                {report.vrpGroups.map((g) => (
+                  <HeatGroup key={g.group} g={g} />
+                ))}
+              </Card>
+            </div>
           </div>
         )}
       </div>
