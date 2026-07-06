@@ -95,18 +95,25 @@ function BoardRow({ row }: { row: AmBoardRow }) {
   return (
     <div className="px-3 py-2.5">
       <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center text-left">
-        <span className={`tabular w-7 shrink-0 rounded px-1 py-0.5 text-center text-[11px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
+        <span className={`tabular w-5 shrink-0 rounded px-0.5 py-0.5 text-center text-[9px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
           {row.tier}
         </span>
         <span className="ml-2 w-12 shrink-0 text-sm font-semibold">{row.sym}</span>
         <span className="tabular ml-2 w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
-        {row.erSpansPut && (
-          <span className="ml-1 shrink-0 rounded bg-amber-500/25 px-1 py-0.5 text-[8px] font-bold uppercase text-amber-200" title="put spans earnings">
-            ER{row.erDays != null ? ` ${row.erDays}d` : ""}
-          </span>
-        )}
         <span className="tabular ml-1.5 w-7 shrink-0 text-[11px] text-muted">{Math.round(row.score)}</span>
         <span className={`ml-1.5 w-8 shrink-0 text-[11px] font-medium ${VRP_STYLE[row.vrp]}`}>{row.vrp}</span>
+        <span className="ml-1.5 flex w-7 shrink-0 flex-col items-center justify-center leading-none">
+          {row.erSpansPut ? (
+            <>
+              <span className="rounded bg-amber-500/25 px-1 text-[7px] font-bold uppercase text-amber-200" title="put spans earnings">
+                ER
+              </span>
+              {row.erDays != null && <span className="mt-0.5 text-[7px] text-amber-200/80">{row.erDays}d</span>}
+            </>
+          ) : (
+            <span className="text-[10px] text-muted/40">—</span>
+          )}
+        </span>
         <span className="tabular ml-1 w-11 shrink-0 text-right text-[11px] text-muted">{c ? `${c.premPct.toFixed(2)}%` : "—"}</span>
         <span className={`tabular ml-1.5 w-12 shrink-0 text-right text-[11px] ${annClass(c?.annPct)}`}>{c?.annPct != null ? `${c.annPct.toFixed(1)}%` : "—"}</span>
         <span className="tabular ml-2 w-14 shrink-0 text-right text-[11px] text-muted">{g?.putWall != null ? `$${g.putWall}` : "—"}</span>
@@ -287,11 +294,12 @@ export function AmReportView({ report }: { report: AmReport }) {
       ) : (
         <Card className="divide-y divide-border p-0">
           <div className="flex items-center px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted">
-            <span className="w-7 shrink-0 text-center">Tier</span>
+            <span className="w-5 shrink-0 text-center">Tier</span>
             <span className="ml-2 w-12 shrink-0">Tkr</span>
             <span className="ml-2 w-14 shrink-0">Price</span>
             <span className="ml-1.5 w-7 shrink-0">Scr</span>
             <span className="ml-1.5 w-8 shrink-0">VRP</span>
+            <span className="ml-1.5 w-7 shrink-0 text-center">ER</span>
             <span className="ml-1 w-11 shrink-0 text-right">30D%</span>
             <span className="ml-1.5 w-12 shrink-0 text-right">Ann%</span>
             <span className="ml-2 w-14 shrink-0 text-right">P-Wall</span>
