@@ -15,7 +15,7 @@ export default async function SettingsPage() {
 
   return (
     <main className="px-4">
-      <PageHeader title="Settings" subtitle="Refresh intervals" right={<BackLink />} />
+      <PageHeader title="Settings" subtitle="Refresh intervals & connections" right={<BackLink />} />
       <div className="mt-4 pb-6">
         <SettingsForm
           initialIntervals={{
