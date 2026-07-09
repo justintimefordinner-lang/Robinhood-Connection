@@ -47,6 +47,44 @@ function robinhoodOptionUrl(id: string): string {
   return `https://robinhood.com/options/${id}`;
 }
 
+// On Android/Chrome, an `intent://` URI lets us explicitly ask for the Robinhood
+// app (package com.robinhood.android — confirmed via Robinhood's own public
+// decompiled-source audit repo) instead of the browser, with S.browser_fallback_url
+// as the safety net if the app isn't installed or doesn't have a matching deep-link
+// target registered for this exact path. This is best-effort: Robinhood's app has to
+// actually recognize /options/{uuid} as one of its own deep-link targets for this to
+// land on the contract page itself rather than just opening to the app's home screen.
+// Not supported outside Android Chrome — anything else just uses the plain web link.
+function robinhoodOptionIntentUrl(id: string): string {
+  const fallback = encodeURIComponent(robinhoodOptionUrl(id));
+  return `intent://robinhood.com/options/${id}#Intent;scheme=https;package=com.robinhood.android;S.browser_fallback_url=${fallback};end`;
+}
+
+function isAndroid(): boolean {
+  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+}
+
+function RobinhoodLink({ id }: { id: string }) {
+  if (!id) return null;
+  return (
+    <a
+      href={robinhoodOptionUrl(id)}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (isAndroid()) {
+          e.preventDefault();
+          window.location.href = robinhoodOptionIntentUrl(id);
+        }
+      }}
+      className="mt-2 block w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-center text-[11px] font-medium text-text transition-colors active:bg-surface"
+    >
+      View on Robinhood ↗
+    </a>
+  );
+}
+
 // Shared column template so the header (in OpenGroupCard) and the rows line up.
 export const CSP_COLS = "grid grid-cols-[1.25fr_0.42fr_0.82fr_0.8fr_0.82fr_0.78fr_0.72fr] items-center gap-x-1";
 // LEAP table: Ticker · DTE · Value · P/L % · P/L $ · Δ.
@@ -238,17 +276,7 @@ function CspDetail({ o }: { o: OptionPosition }) {
         <span><span className="font-semibold">{ins.label}:</span> {ins.detail}</span>
       </div>
       <CopyButton text={formatPositionCopy(o)} />
-      {o.id && (
-        <a
-          href={robinhoodOptionUrl(o.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="mt-2 block w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-center text-[11px] font-medium text-text transition-colors active:bg-surface"
-        >
-          View on Robinhood ↗
-        </a>
-      )}
+      <RobinhoodLink id={o.id} />
     </div>
   );
 }
@@ -294,17 +322,7 @@ function LeapDetail({ o }: { o: OptionPosition }) {
         <span><span className="font-semibold">{ins.label}:</span> {ins.detail}</span>
       </div>
       <CopyButton text={formatPositionCopy(o)} />
-      {o.id && (
-        <a
-          href={robinhoodOptionUrl(o.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="mt-2 block w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-center text-[11px] font-medium text-text transition-colors active:bg-surface"
-        >
-          View on Robinhood ↗
-        </a>
-      )}
+      <RobinhoodLink id={o.id} />
     </div>
   );
 }
