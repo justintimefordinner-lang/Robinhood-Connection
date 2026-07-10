@@ -48,26 +48,12 @@ function robinhoodOptionUrl(id: string, optionType: "put" | "call"): string {
   return `https://robinhood.com/options/${id}_${suffix}`;
 }
 
-// On Android/Chrome, an `intent://` URI lets us explicitly ask for the Robinhood
-// app (package com.robinhood.android — confirmed via Robinhood's own public
-// decompiled-source audit repo) instead of the browser, with S.browser_fallback_url
-// as the safety net if the app isn't installed or doesn't have a matching deep-link
-// target registered for this exact path. This is best-effort: Robinhood's app has to
-// actually recognize /options/{uuid}_{suffix} as one of its own deep-link targets for
-// this to land on the contract page itself rather than just opening to the app's home
-// screen. Not supported outside Android Chrome — anything else just uses the plain
-// web link.
-function robinhoodOptionIntentUrl(id: string, optionType: "put" | "call"): string {
-  const target = robinhoodOptionUrl(id, optionType);
-  const fallback = encodeURIComponent(target);
-  const path = target.replace(/^https:\/\//, "");
-  return `intent://${path}#Intent;scheme=https;package=com.robinhood.android;S.browser_fallback_url=${fallback};end`;
-}
-
-function isAndroid(): boolean {
-  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
-}
-
+// NOTE: we previously tried forcing this open in the Robinhood app on Android via an
+// intent:// URL (package com.robinhood.android). Confirmed NOT to work — the app
+// doesn't recognize /options/{uuid}_{suffix} as one of its own deep-link targets and
+// throws its own "not found" instead of landing on the contract. Reverted to the plain
+// web link, which is confirmed working identically on both desktop and Android — no
+// app-forcing, just robinhood.com opening in whatever the device's default is.
 function RobinhoodLink({ id, optionType }: { id: string; optionType: "put" | "call" }) {
   if (!id) return null;
   return (
@@ -75,13 +61,7 @@ function RobinhoodLink({ id, optionType }: { id: string; optionType: "put" | "ca
       href={robinhoodOptionUrl(id, optionType)}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (isAndroid()) {
-          e.preventDefault();
-          window.location.href = robinhoodOptionIntentUrl(id, optionType);
-        }
-      }}
+      onClick={(e) => e.stopPropagation()}
       className="mt-2 block w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-center text-[11px] font-medium text-text transition-colors active:bg-surface"
     >
       View on Robinhood ↗
@@ -240,6 +220,7 @@ function CspDetail({ o }: { o: OptionPosition }) {
         </span>
       </div>
       <dl className="space-y-1.5 text-xs">
+        {o.underlyingPrice != null && <Row k="Current price" v={`$${o.underlyingPrice.toFixed(2)}`} />}
         <Row k="Opened" v={o.openedAt ? `${o.openedAt} (${daysHeld}d ago)` : "—"} />
         <Row k="Expires" v={`${o.expiration} (${dte} DTE${termDays ? ` · ${termDays}d term` : ""})`} />
         {o.erDate && (() => {

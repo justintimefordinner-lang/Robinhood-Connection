@@ -142,6 +142,8 @@ def map_option(p: dict[str, Any], underlying_price: float | None) -> dict[str, A
     theta = p.get("theta")
     iv = p.get("iv")
     breakeven = (strike + entry) if not is_put else (strike - entry)
+    created_at = p.get("created_at")
+    opened_at = created_at[:10] if isinstance(created_at, str) and len(created_at) >= 10 else None
 
     opt: dict[str, Any] = {
         "id": p.get("symbol", ""),
@@ -160,6 +162,8 @@ def map_option(p: dict[str, Any], underlying_price: float | None) -> dict[str, A
         "breakeven": _round(breakeven),
         "underlyingPrice": _round(underlying_price),
     }
+    if opened_at:
+        opt["openedAt"] = opened_at
     if side == "short" and delta is not None:
         opt["chanceOfProfitShort"] = _round(max(0.0, min(1.0, 1 - abs(delta))), 3)
     return opt

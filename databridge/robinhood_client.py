@@ -268,6 +268,15 @@ def _option_positions(rh, account_number: str | None = None) -> list[dict[str, A
             "theta": _to_float(market.get("theta")),
             "iv": _to_float(market.get("implied_volatility")),
             "mark": _to_float(market.get("mark_price") or market.get("adjusted_mark_price")),
+            # Robinhood's own timestamp for this position record. Best-effort
+            # "opened" date: for a straightforward single trade it's exactly
+            # right, but if the position was later adjusted (e.g. partially
+            # closed/rolled) this reflects that record's created_at rather
+            # than necessarily the very first fill — good enough here since
+            # true original-open tracking would require full order history
+            # (sync_trade_history.py), which this real-time bridge
+            # deliberately doesn't pull every cycle.
+            "created_at": p.get("created_at"),
         })
     return out
 
