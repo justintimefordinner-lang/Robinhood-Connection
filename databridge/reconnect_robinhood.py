@@ -49,6 +49,10 @@ def main() -> int:
     try:
         robinhood_client.get_client(force=True)
     except Exception as exc:  # noqa: BLE001 - surface any auth error verbatim
+        # Note: force=True bypasses the in-memory session cache, but it does
+        # NOT bypass login_guard's cooldown — that's intentional. This button
+        # is exactly the kind of thing that could get mashed repeatedly during
+        # an outage, which is the scenario the cooldown exists to prevent.
         print(f"RECONNECT_FAILED: {exc}")
         return 1
 

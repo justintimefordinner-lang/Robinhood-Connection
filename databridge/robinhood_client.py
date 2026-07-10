@@ -48,6 +48,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+import login_guard
+
 load_dotenv()
 
 _USERNAME = os.environ.get("ROBINHOOD_USERNAME")
@@ -77,10 +79,19 @@ def get_client(force: bool = False):
 
     Pass force=True to bypass the cache and force a fresh login — e.g. after
     a call elsewhere fails with an auth-looking error and you want to retry
-    once with a new session rather than assuming the whole run is broken."""
+    once with a new session rather than assuming the whole run is broken.
+
+    Before every real login attempt (cached or forced), this checks
+    login_guard's cross-process cooldown state first. If we're in a
+    self-imposed cooldown from recent failures, this raises immediately
+    without making any request to Robinhood at all — that check happens
+    regardless of which pm2 process or script called get_client(), since the
+    cooldown state lives in a shared file, not in this process's memory."""
     global _cached_rh
     if _cached_rh is not None and not force:
         return _cached_rh
+
+    login_guard.check_not_locked()
 
     if not _USERNAME or not _PASSWORD:
         raise AuthError(
@@ -96,14 +107,20 @@ def get_client(force: bool = False):
 
         mfa_code = pyotp.TOTP(_TOTP_SECRET).now()
 
-    login_result = rh.login(
-        username=_USERNAME,
-        password=_PASSWORD,
-        mfa_code=mfa_code,
-        store_session=True,
-    )
-    if not login_result or not login_result.get("access_token"):
-        raise AuthError("Robinhood login did not return an access token.")
+    try:
+        login_result = rh.login(
+            username=_USERNAME,
+            password=_PASSWORD,
+            mfa_code=mfa_code,
+            store_session=True,
+        )
+        if not login_result or not login_result.get("access_token"):
+            raise AuthError("Robinhood login did not return an access token.")
+    except Exception:
+        login_guard.record_failure()
+        raise
+
+    login_guard.record_success()
     _cached_rh = rh
     return rh
 
