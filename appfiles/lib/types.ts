@@ -20,6 +20,9 @@ export interface PortfolioSummary {
   cash: number;
   buyingPower: number;
   optionsBuyingPower?: number; // Schwab options buying power (deployable, net of collateral)
+  marginLimit?: number; // Robinhood: total margin approved for this account (the ceiling)
+  marginUsed?: number; // Robinhood: portion of marginLimit currently drawn (limit - unused)
+  optionsCollateral?: number; // Robinhood: cash currently held against short options positions
 }
 
 export interface Equity {

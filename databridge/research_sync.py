@@ -171,7 +171,7 @@ def main() -> None:
 
     out = {
         "meta": {
-            "asOf": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+            "asOf": datetime.now().astimezone().strftime("%Y-%m-%d %I:%M %p %Z"),
             "count": len(symbols),
             "params": indicators.PARAMS,
         },

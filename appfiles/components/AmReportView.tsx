@@ -32,7 +32,12 @@ function bbSigmaClass(v: number | null | undefined): string {
 }
 function timeOnly(iso: string): string {
   try {
-    return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
   } catch {
     return "";
   }

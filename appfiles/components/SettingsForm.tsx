@@ -230,7 +230,10 @@ function RobinhoodSection() {
           Login is paused after {lock.consecutiveFailures} consecutive failure
           {lock.consecutiveFailures === 1 ? "" : "s"} — this protects against repeating the earlier
           rate-limit lockout. It'll allow another attempt automatically at{" "}
-          {lock.lockedUntil ? new Date(lock.lockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—"}.
+          {lock.lockedUntil
+            ? new Date(lock.lockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" })
+            : "—"}
+          .
         </div>
       )}
 

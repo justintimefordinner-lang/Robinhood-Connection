@@ -11,11 +11,23 @@ import { useRouter } from "next/navigation";
 
 type Phase = "idle" | "requesting" | "pending" | "updated";
 
+function tzAbbrev(d: Date): string {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(d);
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function fmtStamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const date = `${p(d.getMonth() + 1)}/${p(d.getDate())}/${String(d.getFullYear()).slice(-2)}`;
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+  const tz = tzAbbrev(d);
+  return `${date} ${time}${tz ? ` ${tz}` : ""}`;
 }
 
 export function AmRefreshButton({ asOf }: { asOf: string }) {

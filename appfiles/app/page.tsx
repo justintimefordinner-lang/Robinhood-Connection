@@ -29,12 +29,19 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// Compact data timestamp: "2026-06-17 23:29 Mountain Daylight Time" → "06/17/26 23:29".
+// Compact data timestamp: "2026-06-17 23:29 Mountain Daylight Time" → "06/17/26 11:29 PM MDT".
 function fmtDataStamp(pricesAsOf: string): string {
-  const m = pricesAsOf.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+  const m = pricesAsOf.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?:\s+(.+))?$/);
   if (!m) return pricesAsOf;
-  const [, y, mo, d, hm] = m;
-  return `${mo}/${d}/${y.slice(2)} ${hm}`;
+  const [, y, mo, d, hh, mm, tzRaw] = m;
+  let hour = parseInt(hh, 10);
+  const ampm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  // Backend sends the full zone name (e.g. "Mountain Daylight Time"); abbreviate
+  // multi-word names to initials ("MDT") and leave already-short ones (e.g. "UTC") as-is.
+  const words = tzRaw?.trim().split(/\s+/) ?? [];
+  const tz = words.length > 1 ? words.map((w) => w[0]).join("") : words[0] ?? "";
+  return `${mo}/${d}/${y.slice(2)} ${hour}:${mm} ${ampm}${tz ? ` ${tz}` : ""}`;
 }
 
 export default async function HomePage() {
@@ -128,6 +135,18 @@ export default async function HomePage() {
   const equityPnlTotal = equities.reduce((s, e) => s + equityPnl(e), 0);
   const optionsPnlTotal = options.reduce((s, o) => s + optionPnl(o), 0);
 
+  // Margin/cash breakdown (Robinhood-specific fields; undefined/0 for accounts
+  // without margin data, e.g. cash-only accounts or the static seed data).
+  const marginLimit = summary.marginLimit ?? 0;
+  const marginUsed = summary.marginUsed ?? 0;
+  const optionsCollateral = summary.optionsCollateral ?? 0;
+  // Cash actually free and clear: what's left after backing out both margin
+  // already drawn AND cash tied up as options collateral. Can go negative if
+  // collateral obligations exceed pure cash (i.e. you're leaning on margin to
+  // cover it) — that's intentional, not a bug, and surfaced in red below.
+  const uncommittedCash = summary.cash - marginUsed - optionsCollateral;
+  const marginPct = marginLimit > 0 ? marginUsed / marginLimit : 0;
+
   const first = valueHistory[0].value;
   const last = valueHistory[valueHistory.length - 1].value;
   const trendPct = (last - first) / first;
@@ -208,10 +227,28 @@ export default async function HomePage() {
             <Stat
               label="Options buying power"
               value={<Amt>{fmtMoney(summary.optionsBuyingPower ?? summary.buyingPower)}</Amt>}
-              sub={<><Amt>{fmtMoney(summary.cash)}</Amt> cash</>}
+              sub={
+                <>
+                  <Amt>
+                    <span className={uncommittedCash < 0 ? "text-rose-400" : undefined}>
+                      {uncommittedCash < 0 ? "−" : ""}
+                      {fmtMoney(Math.abs(uncommittedCash))}
+                    </span>
+                  </Amt>{" "}
+                  uncommitted cash
+                </>
+              }
               pct={share(summary.cash)}
             />
-            <Link href="/crypto" className="block active:opacity-80">
+            {marginLimit > 0 && (
+              <Stat
+                label="Margin used"
+                value={<Amt>{fmtMoney(marginUsed)}</Amt>}
+                sub={<>of <Amt>{fmtMoney(marginLimit)}</Amt> limit</>}
+                pct={`${Math.round(marginPct * 100)}%`}
+              />
+            )}
+            <Link href="/crypto" className={`block active:opacity-80 ${marginLimit > 0 ? "col-span-2" : ""}`}>
               <Stat
                 label="Crypto ›"
                 value={<Amt>{fmtMoney(summary.cryptoValue)}</Amt>}

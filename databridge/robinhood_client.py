@@ -177,6 +177,21 @@ def get_account_snapshot(rh, account_hash: str) -> dict[str, Any]:
     buying_power = float(profile.get("buying_power") or profile.get("crypto_buying_power") or 0.0)
     liquidation_value = float(portfolio.get("equity") or 0.0)
 
+    # margin_balances mirrors exactly what Robinhood's own "Buying power" detail
+    # screen shows (Cash / Margin total / Options collateral / Total):
+    #   - margin_limit: total margin this account is approved for (the ceiling,
+    #     not what's currently borrowed)
+    #   - unallocated_margin_cash: the UNUSED portion of that limit — this is
+    #     literally the "$X,XXX available to invest" figure Robinhood's own UI
+    #     shows, so margin actually drawn = margin_limit - unallocated_margin_cash
+    #   - cash_held_for_options_collateral: cash currently tied up backing
+    #     short options (cash-secured puts, etc.)
+    margin_balances = profile.get("margin_balances") or {}
+    margin_limit = float(margin_balances.get("margin_limit") or 0.0)
+    unallocated_margin_cash = float(margin_balances.get("unallocated_margin_cash") or 0.0)
+    margin_used = max(0.0, margin_limit - unallocated_margin_cash)
+    options_collateral = float(margin_balances.get("cash_held_for_options_collateral") or 0.0)
+
     positions: list[dict[str, Any]] = []
     positions.extend(_equity_positions(rh, account_number))
     positions.extend(_option_positions(rh, account_number))
@@ -186,7 +201,10 @@ def get_account_snapshot(rh, account_hash: str) -> dict[str, Any]:
         "buying_power": buying_power,
         "options_bp": None,  # Robinhood doesn't expose a separate options-BP figure
         "liquidation_value": liquidation_value,
-        "account_type": "margin" if (profile.get("margin_balances") or {}).get("margin_limit") else "cash",
+        "account_type": "margin" if margin_limit else "cash",
+        "margin_limit": margin_limit,
+        "margin_used": margin_used,
+        "options_collateral": options_collateral,
         "positions": positions,
     }
 
