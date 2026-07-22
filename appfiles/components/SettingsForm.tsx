@@ -150,6 +150,8 @@ function RobinhoodSection() {
     manualRequired: boolean;
     lockedUntil: string | null;
     consecutiveFailures: number;
+    lastAttemptAt: string | null;
+    lastErrorType: "rate_limited" | "auth_failed" | "unknown" | null;
   } | null>(null);
 
   // --- Reconnect button ----------------------------------------------
@@ -178,9 +180,13 @@ function RobinhoodSection() {
         manualRequired: !!data.manualRequired,
         lockedUntil: data.lockedUntil,
         consecutiveFailures: data.consecutiveFailures,
+        lastAttemptAt: data.lastAttemptAt ?? null,
+        lastErrorType: data.lastErrorType ?? null,
       });
+      return data.lastAttemptAt as string | null;
     } catch {
       setLock(null);
+      return null;
     }
   }
 
@@ -214,14 +220,21 @@ function RobinhoodSection() {
   async function reconnect() {
     setReconnectStatus("requesting");
     setReconnectError("");
+    const baseline = lock?.lastAttemptAt ?? null;
     try {
       const res = await fetch("/api/robinhood-reconnect", { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Request failed.");
       setReconnectStatus("requested");
-      // Give the backend a moment to write a failure/lock state if this attempt
-      // gets rejected by the cooldown or fails, then refresh the readout.
-      setTimeout(loadLockStatus, 4000);
+      // The script can take a while (Robinhood's own challenge/verification
+      // flow, per the 429s we've seen, doesn't fail fast) — poll a handful of
+      // times rather than checking once, and stop as soon as we see a newer
+      // last-attempt timestamp than what was there before this click.
+      for (const delayMs of [3000, 6000, 10000, 15000, 20000]) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        const lastAttemptAt = await loadLockStatus();
+        if (lastAttemptAt && lastAttemptAt !== baseline) break;
+      }
     } catch (err) {
       setReconnectStatus("error");
       setReconnectError(err instanceof Error ? err.message : "Request failed.");
@@ -230,6 +243,29 @@ function RobinhoodSection() {
 
   return (
     <div className="space-y-5">
+      {/* Interpreted result of the most recent attempt, if it failed */}
+      {lock?.lastErrorType === "rate_limited" && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          <strong>Robinhood rejected this login (HTTP 429 — too many requests).</strong> This is
+          Robinhood's own rate limit on their servers, not something on our end, and retrying sooner
+          is likely to extend it rather than clear it. Best move is to stop attempting for a
+          while — hours, not minutes — before trying again.
+        </div>
+      )}
+      {lock?.lastErrorType === "auth_failed" && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          <strong>Robinhood rejected the login itself</strong> (invalid credentials or a failed
+          verification step) — worth double-checking the username/password saved below.
+        </div>
+      )}
+      {lock?.lastErrorType === "unknown" && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          <strong>The last login attempt failed</strong> for a reason that isn't one of the
+          recognized cases (rate limit or bad credentials) — worth checking the pm2 logs for the
+          full detail.
+        </div>
+      )}
+
       {/* Lockout status banner */}
       {lock?.manualRequired && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">

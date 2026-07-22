@@ -117,17 +117,49 @@ def get_client(force: bool = False, manual: bool = False):
 
         mfa_code = pyotp.TOTP(_TOTP_SECRET).now()
 
+    # robin_stocks prints its own diagnostic messages during the login/
+    # verification flow (e.g. "429 Client Error: Too Many Requests ...
+    # get_prompts_status/") rather than including them in whatever it raises
+    # or returns — our own AuthError below is just a generic fallback with
+    # none of that detail. Tee-ing stdout here (not redirecting it) lets us
+    # capture that detail for login_guard's classification WITHOUT hiding it
+    # from wherever stdout already goes (pm2 logs, reconnect_robinhood.py's
+    # log file) — those prints still show up live, exactly as before.
+    import contextlib
+    import io
+    import sys
+
+    class _Tee:
+        def __init__(self, *streams):
+            self._streams = streams
+
+        def write(self, data):
+            for s in self._streams:
+                s.write(data)
+
+        def flush(self):
+            for s in self._streams:
+                s.flush()
+
+    captured = io.StringIO()
+    tee = _Tee(sys.stdout, captured)
     try:
-        login_result = rh.login(
-            username=_USERNAME,
-            password=_PASSWORD,
-            mfa_code=mfa_code,
-            store_session=True,
-        )
+        with contextlib.redirect_stdout(tee):
+            login_result = rh.login(
+                username=_USERNAME,
+                password=_PASSWORD,
+                mfa_code=mfa_code,
+                store_session=True,
+            )
         if not login_result or not login_result.get("access_token"):
             raise AuthError("Robinhood login did not return an access token.")
-    except Exception:
-        login_guard.record_failure()
+    except Exception as exc:
+        printed = captured.getvalue().strip()
+        # Put whatever robin_stocks printed first — it's almost always the
+        # more specific, useful detail (the actual HTTP error) — then our own
+        # exception message as a fallback/supplement.
+        detail = printed or str(exc)
+        login_guard.record_failure(error_message=detail)
         raise
 
     login_guard.record_success()

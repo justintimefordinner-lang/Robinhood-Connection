@@ -62,7 +62,26 @@ _DEFAULT_STATE = {
     "locked_until": None,
     "manual_required": False,
     "last_attempt_at": None,
+    "last_error_type": None,
+    "last_error_message": None,
 }
+
+
+def classify_error(message: str) -> str:
+    """Bucket a raw exception message into something the Settings UI can give
+    a plain-English interpretation for, instead of showing a stack trace.
+
+    "rate_limited" specifically means Robinhood's own servers rejected the
+    request (429 on the get_prompts_status device-approval poll, seen
+    repeatedly in practice) — this is NOT something retrying fixes, and the
+    UI should say so explicitly rather than implying "try again" the way a
+    generic failure message would."""
+    lower = message.lower()
+    if "429" in message or "too many requests" in lower or "get_prompts_status" in lower:
+        return "rate_limited"
+    if "access token" in lower or "credentials" in lower or "unauthorized" in lower or "401" in message:
+        return "auth_failed"
+    return "unknown"
 
 
 def _read_state() -> dict:
@@ -147,16 +166,24 @@ def check_not_locked(manual: bool = False) -> None:
         )
 
 
-def record_failure() -> None:
+def record_failure(error_message: str | None = None) -> None:
     """Call after a real login attempt fails (automatic OR manual — a manual
     attempt that fails still counts toward the threshold, since a person
     retrying manually right after a failure is the case MANUAL_REQUIRED_AFTER
     exists to eventually catch). Increments the failure count and either sets
     a short auto-retry cooldown (failures < MANUAL_REQUIRED_AFTER) or flips to
-    manual_required with no auto-expiry (failures >= MANUAL_REQUIRED_AFTER)."""
+    manual_required with no auto-expiry (failures >= MANUAL_REQUIRED_AFTER).
+
+    error_message, if given, gets classified via classify_error() and stored
+    so the Settings UI can show an interpreted message (e.g. "Robinhood
+    rejected this — rate limited" rather than a raw traceback)."""
     state = _read_state()
     failures = int(state.get("consecutive_failures", 0)) + 1
     now = datetime.now(timezone.utc)
+    error_type = classify_error(error_message) if error_message else "unknown"
+    # Keep the stored message short — this is surfaced directly in the UI,
+    # not a log file; nobody needs the full multi-line traceback there.
+    trimmed_message = (error_message or "")[:300]
 
     if failures >= MANUAL_REQUIRED_AFTER:
         _write_state(
@@ -165,6 +192,8 @@ def record_failure() -> None:
                 "locked_until": None,
                 "manual_required": True,
                 "last_attempt_at": now.isoformat(),
+                "last_error_type": error_type,
+                "last_error_message": trimmed_message,
             }
         )
         return
@@ -177,19 +206,23 @@ def record_failure() -> None:
             "locked_until": locked_until.isoformat(),
             "manual_required": False,
             "last_attempt_at": now.isoformat(),
+            "last_error_type": error_type,
+            "last_error_message": trimmed_message,
         }
     )
 
 
 def record_success() -> None:
     """Call after a real login attempt succeeds. Clears the failure count,
-    any active cooldown, and the manual_required flag."""
+    any active cooldown, the manual_required flag, and any stored error."""
     _write_state(
         {
             "consecutive_failures": 0,
             "locked_until": None,
             "manual_required": False,
             "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+            "last_error_type": None,
+            "last_error_message": None,
         }
     )
 
@@ -197,7 +230,8 @@ def record_success() -> None:
 def status() -> dict:
     """Read-only snapshot for the Settings UI: are we locked, until when (if
     time-based), whether manual reconnect is required, how many consecutive
-    failures. Never raises."""
+    failures, and an interpretation of the last failure if there was one.
+    Never raises."""
     state = _read_state()
     manual_required = bool(state.get("manual_required"))
     locked_until = state.get("locked_until")
@@ -213,4 +247,6 @@ def status() -> dict:
         "locked_until": locked_until if locked else None,
         "consecutive_failures": int(state.get("consecutive_failures", 0)),
         "last_attempt_at": state.get("last_attempt_at"),
+        "last_error_type": state.get("last_error_type"),
+        "last_error_message": state.get("last_error_message"),
     }

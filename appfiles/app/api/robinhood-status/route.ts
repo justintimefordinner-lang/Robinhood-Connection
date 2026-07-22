@@ -16,6 +16,8 @@ interface GuardState {
   locked_until?: string | null;
   manual_required?: boolean;
   last_attempt_at?: string | null;
+  last_error_type?: "rate_limited" | "auth_failed" | "unknown" | null;
+  last_error_message?: string | null;
 }
 
 export async function GET() {
@@ -37,5 +39,7 @@ export async function GET() {
     lockedUntil: timeLocked ? lockedUntil!.toISOString() : null,
     consecutiveFailures: state.consecutive_failures ?? 0,
     lastAttemptAt: state.last_attempt_at ?? null,
+    lastErrorType: state.last_error_type ?? null,
+    lastErrorMessage: state.last_error_message ?? null,
   });
 }
