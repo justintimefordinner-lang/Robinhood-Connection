@@ -14,6 +14,7 @@ const STATE_PATH = path.join(os.homedir(), ".tokens", "robinhood_login_state.jso
 interface GuardState {
   consecutive_failures?: number;
   locked_until?: string | null;
+  manual_required?: boolean;
   last_attempt_at?: string | null;
 }
 
@@ -26,12 +27,14 @@ export async function GET() {
     // File doesn't exist yet (no login attempts recorded) — treat as clean state.
   }
 
-  const lockedUntil = state.locked_until ? new Date(state.locked_until) : null;
-  const locked = !!lockedUntil && lockedUntil.getTime() > Date.now();
+  const manualRequired = !!state.manual_required;
+  const lockedUntil = state.locked_until && !manualRequired ? new Date(state.locked_until) : null;
+  const timeLocked = !!lockedUntil && lockedUntil.getTime() > Date.now();
 
   return Response.json({
-    locked,
-    lockedUntil: locked ? lockedUntil!.toISOString() : null,
+    locked: timeLocked || manualRequired,
+    manualRequired,
+    lockedUntil: timeLocked ? lockedUntil!.toISOString() : null,
     consecutiveFailures: state.consecutive_failures ?? 0,
     lastAttemptAt: state.last_attempt_at ?? null,
   });

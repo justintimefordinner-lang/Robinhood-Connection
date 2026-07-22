@@ -47,12 +47,15 @@ def main() -> int:
     import robinhood_client
 
     try:
-        robinhood_client.get_client(force=True)
+        robinhood_client.get_client(force=True, manual=True)
     except Exception as exc:  # noqa: BLE001 - surface any auth error verbatim
-        # Note: force=True bypasses the in-memory session cache, but it does
-        # NOT bypass login_guard's cooldown — that's intentional. This button
-        # is exactly the kind of thing that could get mashed repeatedly during
-        # an outage, which is the scenario the cooldown exists to prevent.
+        # manual=True means this call always bypassed login_guard's gate — so
+        # a failure here is a REAL failure (bad credentials, Robinhood itself
+        # rejecting the login, etc.), not a "you have to wait" message. It
+        # still gets recorded via login_guard.record_failure() inside
+        # get_client(), which is what escalates toward manual-required after
+        # enough consecutive failures — this button just isn't blocked BY
+        # that state itself.
         print(f"RECONNECT_FAILED: {exc}")
         return 1
 

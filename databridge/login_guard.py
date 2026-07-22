@@ -23,25 +23,33 @@ checks this file first. If we're in a cooldown window, the attempt is refused
 locally — no request to Robinhood happens at all — regardless of which
 process or script asked.
 
-Schedule is intentionally conservative and grows fast: a single blip clears
-in a couple minutes, but repeated failures push the wait out to hours, on
-the theory that it's much cheaper to have you wait longer than to risk
-another extended, account-wide rate-limit block.
+Schedule is intentionally conservative and grows fast for the first few
+failures (a single blip clears in a couple minutes), but after
+MANUAL_REQUIRED_AFTER consecutive failures, automatic retries stop
+entirely — no more time-based auto-expiry, no waiting it out. At that point
+only an explicit manual reconnect (the Settings page's "Reconnect Robinhood"
+button, which always bypasses this gate immediately) will attempt another
+login. This is deliberate: past a handful of failures, an automatic process
+retrying on a timer is more likely to be the thing repeating whatever caused
+the failures in the first place, and a person deciding to retry right now is
+a meaningfully different, lower-risk action than a script doing it alone in
+the background for hours.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, timedelta, timezone
 
 STATE_PATH = os.path.expanduser("~/.tokens/robinhood_login_state.json")
 
-# consecutive_failures -> cooldown duration before the next attempt is allowed.
-# Index 0 is unused (0 failures = no cooldown); index goes up to the failure
-# count, capping at the last entry for anything beyond it.
-_COOLDOWN_MINUTES = [0, 2, 10, 30, 120, 360]  # last entry = 6h cap
+# consecutive_failures -> cooldown duration (minutes) before an AUTOMATIC
+# retry is allowed. Index 0 unused (0 failures = no cooldown). Once failures
+# reaches MANUAL_REQUIRED_AFTER, automatic retries stop entirely regardless
+# of elapsed time — see manual_required in the state file.
+_COOLDOWN_MINUTES = [0, 2, 10, 30]
+MANUAL_REQUIRED_AFTER = 4
 
 
 def _cooldown_minutes_for(failures: int) -> int:
@@ -49,14 +57,22 @@ def _cooldown_minutes_for(failures: int) -> int:
     return _COOLDOWN_MINUTES[idx]
 
 
+_DEFAULT_STATE = {
+    "consecutive_failures": 0,
+    "locked_until": None,
+    "manual_required": False,
+    "last_attempt_at": None,
+}
+
+
 def _read_state() -> dict:
     if not os.path.exists(STATE_PATH):
-        return {"consecutive_failures": 0, "locked_until": None, "last_attempt_at": None}
+        return dict(_DEFAULT_STATE)
     try:
         with open(STATE_PATH, "r") as f:
-            return json.load(f)
+            return {**_DEFAULT_STATE, **json.load(f)}
     except (json.JSONDecodeError, OSError):
-        return {"consecutive_failures": 0, "locked_until": None, "last_attempt_at": None}
+        return dict(_DEFAULT_STATE)
 
 
 def _write_state(state: dict) -> None:
@@ -86,15 +102,35 @@ def _write_state(state: dict) -> None:
 
 
 class LoginLocked(RuntimeError):
-    """Raised instead of attempting rh.login() at all when we're in a
-    self-imposed cooldown from recent failures."""
+    """Raised instead of attempting rh.login() at all when an AUTOMATIC
+    caller hits either the short cooldown window or the manual-required
+    gate. Never raised for manual=True callers."""
 
 
-def check_not_locked() -> None:
-    """Raise LoginLocked if we're currently in a cooldown window. Call this
-    BEFORE attempting a real login — the whole point is to never even talk
-    to Robinhood while locked out."""
+def check_not_locked(manual: bool = False) -> None:
+    """Raise LoginLocked if an automatic attempt should be refused right now.
+
+    Call this BEFORE attempting a real login — the whole point is to never
+    even talk to Robinhood while gated.
+
+    manual=True (the Settings page's Reconnect button, or any script the
+    person explicitly ran themselves) always passes through immediately,
+    regardless of any cooldown or manual_required state. That's intentional:
+    once a person has decided to retry right now, there's no reason to make
+    them wait — waiting is the automatic scheduler's problem to avoid, not
+    theirs."""
+    if manual:
+        return
+
     state = _read_state()
+
+    if state.get("manual_required"):
+        raise LoginLocked(
+            f"Automatic login retries are paused after {state.get('consecutive_failures', '?')} "
+            f"consecutive failures. This won't retry on its own anymore — use the "
+            f"'Reconnect Robinhood' button in Settings whenever you're ready to try again."
+        )
+
     locked_until = state.get("locked_until")
     if not locked_until:
         return
@@ -105,53 +141,75 @@ def check_not_locked() -> None:
         mins = max(1, int(remaining.total_seconds() // 60))
         raise LoginLocked(
             f"Robinhood login is paused after {state.get('consecutive_failures', '?')} "
-            f"consecutive failures. Retrying too soon risks another rate-limit block, "
-            f"so this is refusing to even attempt a login for ~{mins} more minute(s) "
-            f"(until {until_dt.strftime('%H:%M UTC')})."
+            f"consecutive failures. Refusing to auto-retry for ~{mins} more minute(s) "
+            f"(until {until_dt.strftime('%H:%M UTC')}) — or use 'Reconnect Robinhood' in "
+            f"Settings to try again right now."
         )
 
 
 def record_failure() -> None:
-    """Call after a real login attempt fails. Increments the failure count
-    and sets a new (longer) cooldown window."""
+    """Call after a real login attempt fails (automatic OR manual — a manual
+    attempt that fails still counts toward the threshold, since a person
+    retrying manually right after a failure is the case MANUAL_REQUIRED_AFTER
+    exists to eventually catch). Increments the failure count and either sets
+    a short auto-retry cooldown (failures < MANUAL_REQUIRED_AFTER) or flips to
+    manual_required with no auto-expiry (failures >= MANUAL_REQUIRED_AFTER)."""
     state = _read_state()
     failures = int(state.get("consecutive_failures", 0)) + 1
+    now = datetime.now(timezone.utc)
+
+    if failures >= MANUAL_REQUIRED_AFTER:
+        _write_state(
+            {
+                "consecutive_failures": failures,
+                "locked_until": None,
+                "manual_required": True,
+                "last_attempt_at": now.isoformat(),
+            }
+        )
+        return
+
     cooldown_min = _cooldown_minutes_for(failures)
-    locked_until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_min)
+    locked_until = now + timedelta(minutes=cooldown_min)
     _write_state(
         {
             "consecutive_failures": failures,
             "locked_until": locked_until.isoformat(),
-            "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+            "manual_required": False,
+            "last_attempt_at": now.isoformat(),
         }
     )
 
 
 def record_success() -> None:
-    """Call after a real login attempt succeeds. Clears the failure count
-    and any active cooldown."""
+    """Call after a real login attempt succeeds. Clears the failure count,
+    any active cooldown, and the manual_required flag."""
     _write_state(
         {
             "consecutive_failures": 0,
             "locked_until": None,
+            "manual_required": False,
             "last_attempt_at": datetime.now(timezone.utc).isoformat(),
         }
     )
 
 
 def status() -> dict:
-    """Read-only snapshot for the Settings UI: are we locked, until when,
-    how many consecutive failures. Never raises."""
+    """Read-only snapshot for the Settings UI: are we locked, until when (if
+    time-based), whether manual reconnect is required, how many consecutive
+    failures. Never raises."""
     state = _read_state()
+    manual_required = bool(state.get("manual_required"))
     locked_until = state.get("locked_until")
     locked = False
-    if locked_until:
+    if locked_until and not manual_required:
         try:
             locked = datetime.now(timezone.utc) < datetime.fromisoformat(locked_until)
         except ValueError:
             locked = False
     return {
-        "locked": locked,
+        "locked": locked or manual_required,
+        "manualRequired": manual_required,
         "locked_until": locked_until if locked else None,
         "consecutive_failures": int(state.get("consecutive_failures", 0)),
         "last_attempt_at": state.get("last_attempt_at"),

@@ -147,6 +147,7 @@ function RobinhoodSection() {
   // --- Lockout status ----------------------------------------------------
   const [lock, setLock] = useState<{
     locked: boolean;
+    manualRequired: boolean;
     lockedUntil: string | null;
     consecutiveFailures: number;
   } | null>(null);
@@ -172,7 +173,12 @@ function RobinhoodSection() {
     try {
       const res = await fetch("/api/robinhood-status");
       const data = await res.json();
-      setLock({ locked: data.locked, lockedUntil: data.lockedUntil, consecutiveFailures: data.consecutiveFailures });
+      setLock({
+        locked: data.locked,
+        manualRequired: !!data.manualRequired,
+        lockedUntil: data.lockedUntil,
+        consecutiveFailures: data.consecutiveFailures,
+      });
     } catch {
       setLock(null);
     }
@@ -225,15 +231,22 @@ function RobinhoodSection() {
   return (
     <div className="space-y-5">
       {/* Lockout status banner */}
-      {lock?.locked && (
+      {lock?.manualRequired && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          Login is paused after {lock.consecutiveFailures} consecutive failure
+          Automatic login retries are paused after {lock.consecutiveFailures} consecutive failures —
+          this won't retry on its own anymore. Tap <strong>Reconnect Robinhood</strong> below whenever
+          you're ready to try again; manual attempts always go through immediately.
+        </div>
+      )}
+      {lock?.locked && !lock.manualRequired && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          Automatic retries are paused after {lock.consecutiveFailures} consecutive failure
           {lock.consecutiveFailures === 1 ? "" : "s"} — this protects against repeating the earlier
-          rate-limit lockout. It'll allow another attempt automatically at{" "}
+          rate-limit lockout. It'll allow another automatic attempt at{" "}
           {lock.lockedUntil
             ? new Date(lock.lockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" })
             : "—"}
-          .
+          {" "}— or tap <strong>Reconnect Robinhood</strong> below to try again right now.
         </div>
       )}
 
@@ -296,7 +309,7 @@ function RobinhoodSection() {
           <button
             type="button"
             onClick={reconnect}
-            disabled={reconnectStatus === "requesting" || !!lock?.locked}
+            disabled={reconnectStatus === "requesting"}
             className="rounded-full bg-emerald-500/15 px-4 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30 active:bg-emerald-500/25 disabled:opacity-60"
           >
             {reconnectStatus === "requesting" ? "Requesting…" : "Reconnect Robinhood"}

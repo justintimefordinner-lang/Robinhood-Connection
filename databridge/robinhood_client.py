@@ -64,7 +64,7 @@ class AuthError(RuntimeError):
 _cached_rh = None  # module-level so it's shared across every caller/import within one process
 
 
-def get_client(force: bool = False):
+def get_client(force: bool = False, manual: bool = False):
     """Log in and return the robin_stocks module itself (it's function-based,
     not object-based, so there's no separate client object — this just
     centralizes the login call and env validation).
@@ -77,21 +77,31 @@ def get_client(force: bool = False):
     a session that was already valid. Now login only actually runs once per
     process; every other call just returns the same authenticated module.
 
-    Pass force=True to bypass the cache and force a fresh login — e.g. after
-    a call elsewhere fails with an auth-looking error and you want to retry
-    once with a new session rather than assuming the whole run is broken.
+    Pass force=True to bypass the in-process cache and force a fresh login —
+    e.g. after a call elsewhere fails with an auth-looking error and you want
+    to retry once with a new session rather than assuming the whole run is
+    broken. force=True does NOT bypass login_guard's cooldown/manual-required
+    gate below — an automatic retry is still an automatic retry.
+
+    Pass manual=True ONLY when a person explicitly asked for this attempt
+    right now (the Settings page's Reconnect button, reconnect_robinhood.py
+    when run by hand). manual=True skips login_guard's gate entirely,
+    regardless of any cooldown or manual-required state — see
+    login_guard.check_not_locked() for why that's the intended behavior.
+    Every other caller should leave this False.
 
     Before every real login attempt (cached or forced), this checks
-    login_guard's cross-process cooldown state first. If we're in a
-    self-imposed cooldown from recent failures, this raises immediately
-    without making any request to Robinhood at all — that check happens
-    regardless of which pm2 process or script called get_client(), since the
-    cooldown state lives in a shared file, not in this process's memory."""
+    login_guard's cross-process cooldown state first (unless manual=True).
+    If an automatic caller is gated (short cooldown, or manual-required after
+    repeated failures), this raises immediately without making any request
+    to Robinhood at all — that check happens regardless of which pm2 process
+    or script called get_client(), since the state lives in a shared file,
+    not in this process's memory."""
     global _cached_rh
     if _cached_rh is not None and not force:
         return _cached_rh
 
-    login_guard.check_not_locked()
+    login_guard.check_not_locked(manual=manual)
 
     if not _USERNAME or not _PASSWORD:
         raise AuthError(
