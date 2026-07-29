@@ -1,6 +1,10 @@
 // Backs the Settings page's "Update from GitHub" button: runs `git pull` in
-// the repo root, then restarts the pm2 processes so the new code actually
-// takes effect - one tap instead of SSHing in for `git pull && pm2 restart`.
+// the repo root, rebuilds the Next.js app (npm install + npm run build,
+// since `pm2 restart` alone just re-serves whatever was already built into
+// .next/ - it does NOT pick up new appfiles/ source on its own), then
+// restarts the pm2 processes so the new code actually takes effect. One tap
+// instead of SSHing in for `git pull && npm install && npm run build && pm2
+// restart`.
 //
 // Same detached-spawn pattern as /api/robinhood-reconnect: the HTTP response
 // returns immediately once the background script is launched, since the
@@ -16,8 +20,11 @@ export const dynamic = "force-dynamic";
 
 // process.cwd() for the Next app is .../JerStock/appfiles, so the repo root
 // (where .git lives) is one level up - same resolution style as
-// AM_REPORT_BRIDGE_DIR in the robinhood-reconnect route.
+// AM_REPORT_BRIDGE_DIR in the robinhood-reconnect route. APPFILES_DIR is
+// just process.cwd() itself, named explicitly so the build-step commands
+// below read clearly regardless of where this route happens to be running.
 const REPO_DIR = process.env.APP_REPO_DIR || path.resolve(process.cwd(), "..");
+const APPFILES_DIR = process.cwd();
 const LOG_PATH = path.join(process.cwd(), "data", "git-update.log");
 
 // Restart these specific pm2 processes (matches ecosystem.config.js) rather
@@ -37,14 +44,21 @@ export async function POST() {
   const log = fs.openSync(LOG_PATH, "a");
   fs.writeSync(log, `\n--- git update requested ${new Date().toISOString()} ---\n`);
 
-  // `set -e` means a failed `git pull` (merge conflict, no network, etc.)
-  // stops the script before touching pm2 at all - no point restarting every
-  // process into the exact same code that was already running.
+  // `set -e` means a failure at ANY step (git pull conflict, npm install
+  // error, a build that doesn't compile, etc.) stops the script before the
+  // next step runs - in particular, before pm2 restart, so a broken build
+  // never gets served: every process just keeps running the last good build
+  // until this succeeds cleanly end to end.
   const script = [
     "set -e",
     "echo '$ git pull'",
     "git pull",
-    "echo 'git pull succeeded - restarting pm2 processes'",
+    `cd "${APPFILES_DIR}"`,
+    "echo '$ npm install'",
+    "npm install",
+    "echo '$ npm run build'",
+    "npm run build",
+    "echo 'Build succeeded - restarting pm2 processes'",
     `pm2 restart ${PM2_PROCESSES.join(" ")}`,
     "echo 'Done.'",
   ].join("\n");
@@ -76,12 +90,13 @@ export async function POST() {
 // Lets the Settings page poll for the tail of the log after triggering an
 // update, including across the brief window where this very server process
 // is being restarted (the fetch will just fail/retry client-side until the
-// new instance is back up).
+// new instance is back up). Tail is longer than before (npm install/build
+// output is a lot chattier than a plain git pull + pm2 restart was).
 export async function GET() {
   try {
     const raw = fs.readFileSync(LOG_PATH, "utf8");
     const lines = raw.trim().split("\n");
-    return Response.json({ ok: true, log: lines.slice(-40).join("\n") });
+    return Response.json({ ok: true, log: lines.slice(-120).join("\n") });
   } catch {
     return Response.json({ ok: true, log: "" });
   }

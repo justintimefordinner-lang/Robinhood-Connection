@@ -431,9 +431,11 @@ function GitUpdateSection() {
     // From here on, `appfiles` itself may get killed and replaced by pm2
     // mid-poll - a failed fetch during that window just means "still
     // restarting," not a real error, so keep retrying rather than bailing
-    // on the first connection refusal. Give it up to ~2 minutes total.
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    // on the first connection refusal. npm install + a Next.js build on a
+    // Pi can take several minutes, so give this up to ~10 minutes total,
+    // not just long enough for a plain restart.
+    for (let i = 0; i < 150; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
       try {
         const text = await pollLog();
         setLog(text);
@@ -449,16 +451,17 @@ function GitUpdateSection() {
       }
     }
     setStatus("error");
-    setError("Timed out waiting for the update to finish - check the log below or pm2 logs directly.");
+    setError("Timed out waiting for the update to finish (10 min) - check the log below or pm2 logs directly.");
   }
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        Runs <code className="text-[10px]">git pull</code> in the repo, then restarts every pm2
-        process (including this app itself) so the new code takes effect. The page may briefly
-        stop responding while <code className="text-[10px]">appfiles</code> restarts - that&apos;s
-        expected, not a failure.
+        Runs <code className="text-[10px]">git pull</code>, then <code className="text-[10px]">npm install</code>{" "}
+        and <code className="text-[10px]">npm run build</code> (a plain restart alone would just re-serve the
+        old build), then restarts every pm2 process including this app itself. Can take a few minutes on a
+        Pi - the page may stop responding briefly while <code className="text-[10px]">appfiles</code> restarts
+        at the end; that&apos;s expected, not a failure.
       </p>
 
       <div className="flex items-center gap-3">
