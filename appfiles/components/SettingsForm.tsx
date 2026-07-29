@@ -65,6 +65,23 @@ function labelClass() {
   return "mb-1 block text-xs font-medium text-muted";
 }
 
+// Renders an ISO timestamp as "3m ago" / "5h ago" / "2d ago" etc. `nowMs` is
+// passed in (rather than read fresh via Date.now() inline) so callers can
+// force a re-render on a timer and get an updated relative string without
+// needing to re-fetch anything from the server.
+function formatRelativeTime(iso: string, nowMs: number): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "unknown";
+  const diffSec = Math.max(0, Math.floor((nowMs - then) / 1000));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 function IntervalsSection({ initialIntervals }: { initialIntervals: Intervals }) {
   const [intervals, setIntervals] = useState<Intervals>(initialIntervals);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -158,6 +175,15 @@ function RobinhoodSection() {
   const [reconnectStatus, setReconnectStatus] = useState<"idle" | "requesting" | "requested" | "error">("idle");
   const [reconnectError, setReconnectError] = useState("");
 
+  // Ticks every 30s so the "last attempt: Xm/h/d ago" text below stays
+  // current without re-fetching /api/robinhood-status on a timer just for
+  // that — the actual data only changes on load or after a reconnect.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   async function loadCredentials() {
     try {
       const res = await fetch("/api/robinhood-credentials");
@@ -243,6 +269,16 @@ function RobinhoodSection() {
 
   return (
     <div className="space-y-5">
+      {/* Always-visible: when the last login attempt (success or failure) happened */}
+      {lock?.lastAttemptAt && (
+        <div className="text-xs text-muted">
+          Last login attempt: <span className="text-text">{formatRelativeTime(lock.lastAttemptAt, nowMs)}</span>{" "}
+          <span className="text-muted">
+            ({new Date(lock.lastAttemptAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })})
+          </span>
+        </div>
+      )}
+
       {/* Interpreted result of the most recent attempt, if it failed */}
       {lock?.lastErrorType === "rate_limited" && (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
@@ -336,9 +372,11 @@ function RobinhoodSection() {
 
       <div className="border-t border-border pt-4">
         <p className="text-xs text-muted">
-          Clears the saved Robinhood session and forces a brand-new login. Use this if a login attempt
-          was interrupted (e.g. you missed the device-approval push notification) and it doesn&apos;t
-          seem to be retrying on its own.
+          Makes exactly one login attempt right now. If your existing session is still valid this
+          succeeds instantly with no prompt; if not, Robinhood may send a device-approval push to
+          your phone as part of this same attempt — have it ready before tapping. This does not
+          retry on its own, so avoid pressing it repeatedly in a row if it fails; that's what can
+          extend a Robinhood-side rate limit rather than clear it.
         </p>
 
         <div className="mt-3 flex items-center gap-3">
@@ -361,6 +399,91 @@ function RobinhoodSection() {
 }
 
 // ---------------------------------------------------------------------------
+// App update (git pull + pm2 restart)
+// ---------------------------------------------------------------------------
+
+function GitUpdateSection() {
+  const [status, setStatus] = useState<"idle" | "requesting" | "restarting" | "done" | "error">("idle");
+  const [log, setLog] = useState("");
+  const [error, setError] = useState("");
+
+  async function pollLog(): Promise<string> {
+    const res = await fetch("/api/git-update");
+    const data = await res.json();
+    return (data.log as string) ?? "";
+  }
+
+  async function triggerUpdate() {
+    setStatus("requesting");
+    setError("");
+    setLog("");
+    try {
+      const res = await fetch("/api/git-update", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Request failed.");
+      setStatus("restarting");
+    } catch (err) {
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Request failed.");
+      return;
+    }
+
+    // From here on, `appfiles` itself may get killed and replaced by pm2
+    // mid-poll - a failed fetch during that window just means "still
+    // restarting," not a real error, so keep retrying rather than bailing
+    // on the first connection refusal. Give it up to ~2 minutes total.
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const text = await pollLog();
+        setLog(text);
+        if (/finished, exit code|Done\.$/.test(text.trim())) {
+          setStatus(/finished, exit code 0|Done\.$/.test(text.trim()) ? "done" : "error");
+          if (!/Done\.$/.test(text.trim())) {
+            setError("git pull or pm2 restart failed - see log below.");
+          }
+          return;
+        }
+      } catch {
+        // Still restarting (or briefly unreachable) - keep polling.
+      }
+    }
+    setStatus("error");
+    setError("Timed out waiting for the update to finish - check the log below or pm2 logs directly.");
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        Runs <code className="text-[10px]">git pull</code> in the repo, then restarts every pm2
+        process (including this app itself) so the new code takes effect. The page may briefly
+        stop responding while <code className="text-[10px]">appfiles</code> restarts - that&apos;s
+        expected, not a failure.
+      </p>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={triggerUpdate}
+          disabled={status === "requesting" || status === "restarting"}
+          className="rounded-full bg-emerald-500/15 px-4 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30 active:bg-emerald-500/25 disabled:opacity-60"
+        >
+          {status === "requesting" || status === "restarting" ? "Updating…" : "Update from GitHub"}
+        </button>
+        {status === "done" && <span className="text-xs text-emerald-400">Updated and restarted.</span>}
+        {status === "error" && <span className="text-xs text-rose-400">{error}</span>}
+      </div>
+
+      {log && (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-surface-2 p-2 text-[11px] text-muted">
+          {log}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Top-level menu
 // ---------------------------------------------------------------------------
 
@@ -372,6 +495,9 @@ export function SettingsForm({ initialIntervals }: { initialIntervals: Intervals
       </MenuItem>
       <MenuItem title="Robinhood connection" subtitle="Credentials, login status, and reconnect">
         <RobinhoodSection />
+      </MenuItem>
+      <MenuItem title="App update" subtitle="Pull latest code from GitHub and restart">
+        <GitUpdateSection />
       </MenuItem>
     </div>
   );

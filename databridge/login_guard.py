@@ -23,17 +23,20 @@ checks this file first. If we're in a cooldown window, the attempt is refused
 locally — no request to Robinhood happens at all — regardless of which
 process or script asked.
 
-Schedule is intentionally conservative and grows fast for the first few
-failures (a single blip clears in a couple minutes), but after
-MANUAL_REQUIRED_AFTER consecutive failures, automatic retries stop
-entirely — no more time-based auto-expiry, no waiting it out. At that point
-only an explicit manual reconnect (the Settings page's "Reconnect Robinhood"
-button, which always bypasses this gate immediately) will attempt another
-login. This is deliberate: past a handful of failures, an automatic process
-retrying on a timer is more likely to be the thing repeating whatever caused
-the failures in the first place, and a person deciding to retry right now is
-a meaningfully different, lower-risk action than a script doing it alone in
-the background for hours.
+MANUAL_REQUIRED_AFTER is intentionally set to 1: the very first automatic
+login failure stops all further automatic retries immediately, with no
+time-based cooldown and no auto-expiry. At that point only an explicit
+manual reconnect (the Settings page's "Reconnect Robinhood" button, which
+always bypasses this gate immediately) will attempt another login. This is
+deliberate: Robinhood's login now requires a device-approval challenge, and
+an automatic process silently retrying that challenge unattended is exactly
+what was re-triggering it over and over with nobody there to approve it -
+each failure just made the underlying rate-limit worse. A person deciding to
+retry right now, phone in hand and ready for the approval prompt, is a
+meaningfully different, lower-risk action than a script doing it alone in
+the background for hours. The `_COOLDOWN_MINUTES` ladder below is kept for
+reference/tuning but is effectively unused at MANUAL_REQUIRED_AFTER=1, since
+failure #1 already routes straight to manual_required.
 """
 
 from __future__ import annotations
@@ -47,9 +50,11 @@ STATE_PATH = os.path.expanduser("~/.tokens/robinhood_login_state.json")
 # consecutive_failures -> cooldown duration (minutes) before an AUTOMATIC
 # retry is allowed. Index 0 unused (0 failures = no cooldown). Once failures
 # reaches MANUAL_REQUIRED_AFTER, automatic retries stop entirely regardless
-# of elapsed time — see manual_required in the state file.
+# of elapsed time — see manual_required in the state file. Currently dead
+# weight at MANUAL_REQUIRED_AFTER=1 (kept in case that threshold is ever
+# raised again) - see module docstring.
 _COOLDOWN_MINUTES = [0, 2, 10, 30]
-MANUAL_REQUIRED_AFTER = 4
+MANUAL_REQUIRED_AFTER = 1
 
 
 def _cooldown_minutes_for(failures: int) -> int:
