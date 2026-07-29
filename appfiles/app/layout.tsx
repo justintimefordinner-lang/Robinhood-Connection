@@ -20,6 +20,7 @@ export const metadata: Metadata = {
   title: "Portfolio",
   description: "Personal options & equity portfolio cockpit",
   applicationName: "Portfolio",
+  manifest: "/manifest.json",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Portfolio" },
 };
 
