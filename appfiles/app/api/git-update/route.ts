@@ -27,11 +27,6 @@ const REPO_DIR = process.env.APP_REPO_DIR || path.resolve(process.cwd(), "..");
 const APPFILES_DIR = process.cwd();
 const LOG_PATH = path.join(process.cwd(), "data", "git-update.log");
 
-// Restart these specific pm2 processes (matches ecosystem.config.js) rather
-// than `pm2 restart all` - keeps the list explicit, so some unrelated pm2
-// process added later on the Pi wouldn't get bounced by this button too.
-const PM2_PROCESSES = ["appfiles", "databridge", "databridge-history", "databridge-earnings"];
-
 let pending = false;
 
 export async function POST() {
@@ -58,8 +53,16 @@ export async function POST() {
     "npm install",
     "echo '$ npm run build'",
     "npm run build",
-    "echo 'Build succeeded - restarting pm2 processes'",
-    `pm2 restart ${PM2_PROCESSES.join(" ")}`,
+    "echo 'Build succeeded - restarting all pm2 processes'",
+    // `all` rather than an explicit name list: the list would go stale every
+    // time a process is added (it had already missed MinuteTracker and
+    // banker, which would have kept running pre-update code). Note this also
+    // STARTS anything currently stopped - so a process left stopped on
+    // purpose will come back up after an update.
+    "pm2 restart all",
+    // Persist the resulting process list so a reboot resurrects this state
+    // rather than whatever was saved last.
+    "pm2 save",
     "echo 'Done.'",
   ].join("\n");
 
