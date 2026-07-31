@@ -49,8 +49,15 @@ export async function POST() {
     "echo '$ git pull'",
     "git pull",
     `cd "${APPFILES_DIR}"`,
-    "echo '$ npm install'",
-    "npm install",
+    "echo '$ npm install --include=dev'",
+    // --include=dev is required, not optional: this script is spawned as a
+    // child of the pm2-managed Next.js server, which runs with
+    // NODE_ENV=production, and npm install SKIPS devDependencies under that
+    // env var. Build-only packages (@tailwindcss/postcss, typescript, etc.)
+    // would silently never install, and `npm run build` would then die with
+    // "Cannot find module '@tailwindcss/postcss'". Running the same command
+    // by hand over SSH works precisely because NODE_ENV isn't set there.
+    "npm install --include=dev",
     "echo '$ npm run build'",
     "npm run build",
     "echo 'Build succeeded - restarting all pm2 processes'",
