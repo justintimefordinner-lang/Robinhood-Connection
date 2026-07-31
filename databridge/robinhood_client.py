@@ -64,6 +64,91 @@ class AuthError(RuntimeError):
 _cached_rh = None  # module-level so it's shared across every caller/import within one process
 
 
+# How long (seconds) to keep retrying a throttled device-approval status poll
+# before giving up. Needs to comfortably exceed the time it takes to notice a
+# push notification, unlock a phone, open the Robinhood app and tap approve.
+PROMPT_POLL_BUDGET_SECONDS = 180.0
+
+
+def _install_prompt_poll_retry() -> None:
+    """Work around an upstream robin_stocks bug that makes device-approval
+    logins fail instantly whenever Robinhood throttles the status endpoint.
+
+    In robin_stocks/robinhood/authentication.py, _validate_sherrif_id polls
+    for approval like this:
+
+        prompt_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
+        while True:
+            time.sleep(5)
+            prompt_challenge_status = request_get(url=prompt_url)
+            if prompt_challenge_status["challenge_status"] == "validated":
+                break
+
+    There is no error handling in that loop, and request_get swallows HTTP
+    errors and returns None. So if Robinhood answers the very first poll with
+    a 429 - which is exactly what our logs show, five seconds after the push
+    goes out - the code evaluates None["challenge_status"], raises
+    "'NoneType' object is not subscriptable", and the whole login dies before
+    the person has any realistic chance to approve the prompt on their phone.
+    (Notice the workflow-status loop further down that same function DOES
+    have try/except with retries and backoff; this loop just never got the
+    same treatment.)
+
+    Rather than editing the installed library - which any `pip install -U`
+    would silently revert - we wrap request_get inside the authentication
+    module's namespace and add retry/backoff for that single endpoint. Every
+    other request_get call in the library is passed through untouched.
+    """
+    import time
+
+    import robin_stocks.robinhood.authentication as _auth
+
+    # Idempotent: get_client() may run several times per process.
+    if getattr(_auth, "_jerstock_prompt_retry_installed", False):
+        return
+
+    _original_request_get = _auth.request_get
+
+    def _request_get_with_prompt_retry(*args, **kwargs):
+        url = kwargs.get("url")
+        if url is None and args:
+            url = args[0]
+
+        result = _original_request_get(*args, **kwargs)
+
+        # Only intervene for the device-approval status endpoint, and only
+        # when the response is unusable. A well-formed response - including a
+        # legitimate not-yet-approved one - passes straight through so the
+        # library's own loop keeps control of the polling cadence.
+        if not isinstance(url, str) or "get_prompts_status" not in url:
+            return result
+        if isinstance(result, dict) and "challenge_status" in result:
+            return result
+
+        deadline = time.time() + PROMPT_POLL_BUDGET_SECONDS
+        delay = 2.0
+        while time.time() < deadline:
+            time.sleep(delay)
+            delay = min(delay * 1.5, 15.0)  # gentle backoff, capped
+            result = _original_request_get(*args, **kwargs)
+            if isinstance(result, dict) and "challenge_status" in result:
+                return result
+
+        # Out of budget. Raise something legible instead of returning None and
+        # letting the library die on None["challenge_status"] - this message
+        # ends up in login_guard's classification and the reconnect log.
+        raise RuntimeError(
+            "Robinhood kept throttling the device-approval status check "
+            f"(get_prompts_status) for {PROMPT_POLL_BUDGET_SECONDS:.0f}s. The "
+            "approval prompt may still have reached your phone, but this login "
+            "could not confirm it. Wait before trying again - repeated attempts "
+            "extend the throttle."
+        )
+
+    _auth.request_get = _request_get_with_prompt_retry
+    _auth._jerstock_prompt_retry_installed = True
+
+
 def get_client(force: bool = False, manual: bool = False):
     """Log in and return the robin_stocks module itself (it's function-based,
     not object-based, so there's no separate client object — this just
@@ -110,6 +195,8 @@ def get_client(force: bool = False, manual: bool = False):
         )
 
     import robin_stocks.robinhood as rh
+
+    _install_prompt_poll_retry()
 
     mfa_code = None
     if _TOTP_SECRET:
