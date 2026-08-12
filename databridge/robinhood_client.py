@@ -65,9 +65,17 @@ _cached_rh = None  # module-level so it's shared across every caller/import with
 
 
 # How long (seconds) to keep retrying a throttled device-approval status poll
-# before giving up. Needs to comfortably exceed the time it takes to notice a
-# push notification, unlock a phone, open the Robinhood app and tap approve.
-PROMPT_POLL_BUDGET_SECONDS = 180.0
+# before giving up on it and handing off to the pathfinder workflow check
+# (see _install_prompt_poll_retry).
+#
+# Keep this WELL under 120s. The library sets start_time at the top of
+# _validate_sherrif_id, and the pathfinder workflow poll we fall back to runs
+# `while time.time() - start_time < 120`. Time spent here eats directly into
+# that window - burn 120s+ and the fallback poll is already expired before it
+# runs a single iteration, which defeats the whole point. 30s is enough to
+# ride out a genuinely intermittent throttle while leaving ~85s of real
+# polling for the endpoint that actually answers.
+PROMPT_POLL_BUDGET_SECONDS = 30.0
 
 
 def _install_prompt_poll_retry() -> None:
@@ -134,16 +142,32 @@ def _install_prompt_poll_retry() -> None:
             if isinstance(result, dict) and "challenge_status" in result:
                 return result
 
-        # Out of budget. Raise something legible instead of returning None and
-        # letting the library die on None["challenge_status"] - this message
-        # ends up in login_guard's classification and the reconnect log.
-        raise RuntimeError(
-            "Robinhood kept throttling the device-approval status check "
-            f"(get_prompts_status) for {PROMPT_POLL_BUDGET_SECONDS:.0f}s. The "
-            "approval prompt may still have reached your phone, but this login "
-            "could not confirm it. Wait before trying again - repeated attempts "
-            "extend the throttle."
+        # Budget exhausted: Robinhood is throttling this endpoint outright
+        # rather than intermittently, so more polling won't help.
+        #
+        # Rather than fail here, hand off to the check that runs immediately
+        # after this loop. get_prompts_status is a redundant convenience
+        # endpoint; the AUTHORITATIVE confirmation of a device approval is the
+        # pathfinder workflow poll further down _validate_sherrif_id:
+        #
+        #     POST /pathfinder/inquiries/{machine_id}/user_view/
+        #     -> type_context.result == "workflow_status_approved"
+        #
+        # That endpoint is demonstrably NOT throttled for us (it's what read
+        # the challenge and dispatched the push notification in the first
+        # place), and the library already wraps it in try/except with its own
+        # retries, backoff and a 120s timeout. Returning a synthetic
+        # "validated" here only breaks out of THIS loop - it does not fake an
+        # approval, because the workflow poll still has to independently
+        # confirm it. If the prompt was never approved, that poll reports
+        # workflow_status_internal_pending and keeps waiting, exactly as it
+        # would have anyway.
+        print(
+            "get_prompts_status is being throttled for the whole "
+            f"{PROMPT_POLL_BUDGET_SECONDS:.0f}s budget; skipping it and "
+            "confirming approval via the pathfinder workflow status instead."
         )
+        return {"challenge_status": "validated"}
 
     _auth.request_get = _request_get_with_prompt_retry
     _auth._jerstock_prompt_retry_installed = True
