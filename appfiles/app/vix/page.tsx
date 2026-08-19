@@ -6,9 +6,10 @@ import { PostureStats } from "@/components/PostureStats";
 import { VixIndicators } from "@/components/VixIndicators";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
+import { Freshness } from "@/components/RefreshButton";
 import { getSnapshot } from "@/lib/snapshot";
 import { getSelectedAccount } from "@/lib/account";
-import { getVixSnapshot } from "@/lib/vix-data";
+import { getVixSnapshot, getVixUpdatedAt } from "@/lib/vix-data";
 import { assessVix, REGIME_COLORS, type Regime } from "@/lib/vix";
 import { cspCollateralTotal, spreadRiskCapital } from "@/lib/calc";
 import type { OptionPosition } from "@/lib/types";
@@ -27,6 +28,7 @@ export default async function VixPage() {
   const snap = await getSnapshot();
   const { id, data } = await getSelectedAccount(snap);
   const vix = getVixSnapshot();
+  const vixUpdatedAt = getVixUpdatedAt();
 
   return (
     <main className="px-4">
@@ -37,6 +39,7 @@ export default async function VixPage() {
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <AccountSwitcher accounts={snap.accounts} selectedId={id} />
               <span>· {vix ? `VIX ${vix.inputs.vix.toFixed(2)}` : "no data"}</span>
+              {vix && vixUpdatedAt && <Freshness generatedAt={vixUpdatedAt} />}
             </span>
           }
           right={<BackLink />}
@@ -180,7 +183,7 @@ function VixBody({
         Not financial advice — a rules-based framework from your context doc, applied to the
         snapshot. {a.confidence === "reduced" && `Reduced confidence: ${a.missing.join("; ")} not in the data feed. `}
         Source: {vix.source}. As of {vix.asof}.
-        <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />
+        <DataRefresh status={getRefreshStatus().app} />
       </p>
     </>
   );

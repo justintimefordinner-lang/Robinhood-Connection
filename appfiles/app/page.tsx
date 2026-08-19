@@ -161,7 +161,7 @@ export default async function HomePage() {
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <AccountSwitcher accounts={accounts} selectedId={id} />
             <span>As of {fmtDataStamp(meta.pricesAsOf)}</span>
-            <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />
+            <DataRefresh status={getRefreshStatus().app} />
           </span>
         }
         right={

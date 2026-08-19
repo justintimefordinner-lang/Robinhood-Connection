@@ -33,7 +33,7 @@ export default function BriefingPage() {
           report ? (
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <span>Pre-open · {report.meta.passed} on board · {asOfLabel(report.meta.asOf)}</span>
-              <DataRefresh nextAt={getRefreshStatus().am_report?.nextAt} />
+              <DataRefresh status={getRefreshStatus().am_report} />
             </span>
           ) : (
             "Run am_report.py to build the report"
