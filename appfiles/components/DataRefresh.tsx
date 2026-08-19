@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { FeedStatus } from "@/lib/refresh-status";
 
 export function StopwatchIcon({ className = "" }: { className?: string }) {
@@ -45,6 +46,27 @@ function WarningIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function KeyIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="11"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`-mt-px inline-block shrink-0 ${className}`}
+    >
+      <circle cx="8" cy="15" r="4" />
+      <path d="M10.85 12.15 20 3" />
+      <path d="M16 7 19 4" />
+      <path d="M18.5 4.5 21 7" />
+    </svg>
+  );
+}
+
 function relativeTime(iso: string, nowMs: number): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
@@ -59,9 +81,12 @@ function relativeTime(iso: string, nowMs: number): string {
 
 // Live count to the next data refresh. Two independent ways to drive it:
 //   - `status`: a FeedStatus from getRefreshStatus() (the scheduler file) -
-//     used by every page-level caller. Also unlocks the failure display: if
-//     status.status === "error", this shows a red "failed Xm ago" badge
-//     instead of a countdown, with the message on hover/long-press.
+//     used by every page-level caller. Also unlocks two non-countdown
+//     displays: status.status === "login_required" shows a calm amber
+//     "Login needed" badge linking straight to Settings (a known, one-tap
+//     fix - login_guard paused auto-retry, not a real failure), and
+//     status.status === "error" shows a red "failed Xm ago" badge with the
+//     message on hover/long-press for anything else that went wrong.
 //   - `nextAt` + `cadence`: a plain ISO timestamp, for the one caller
 //     (the in-report CSP ladder timer in AmReportView) whose "next refresh"
 //     is computed per-report by am_report.py rather than read from the
@@ -108,6 +133,18 @@ export function DataRefresh({
       router.refresh();
     }
   }, [autoRefresh, justExpired, now, router]);
+
+  if (status?.status === "login_required") {
+    return (
+      <Link
+        href="/settings"
+        title="Robinhood session needs reconnecting - tap to go to Settings"
+        className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-amber-500/20 px-1 py-0.5 align-middle text-[9px] font-semibold tabular text-amber-200 active:bg-amber-500/30"
+      >
+        <KeyIcon /> Login needed
+      </Link>
+    );
+  }
 
   if (status?.status === "error") {
     const attemptedAt = status.lastAttemptAt;

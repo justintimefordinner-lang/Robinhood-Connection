@@ -10,7 +10,7 @@ export interface FeedStatus {
   lastAttemptAt?: string; // last time a run was attempted at all, success or not
   nextAt?: string;
   intervalSec?: number;
-  status?: "ok" | "error";
+  status?: "ok" | "error" | "login_required";
   error?: string; // present when status === "error"
 }
 export type RefreshStatus = Record<string, FeedStatus>;

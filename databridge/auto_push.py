@@ -57,11 +57,20 @@ def _interval(name: str, default: int) -> int:
 
 def _run(label: str, fn) -> tuple[float, object, str, str | None]:
     """Returns (elapsed, result, outcome, message).
-    outcome is one of "ok" / "skipped" / "error". "skipped" (a deliberate
-    SystemExit, e.g. "Market closed - skipping ladder refresh") is NOT the
-    same as a failure - it's expected, routine behavior - so it must not be
-    surfaced to the user as an error. Only a genuine exception counts as
-    "error"."""
+    outcome is one of "ok" / "skipped" / "login_required" / "error".
+      "skipped"        - a deliberate SystemExit (e.g. "Market closed -
+                          skipping ladder refresh"). Expected, routine
+                          behavior, not a failure.
+      "login_required" - login_guard.LoginLocked: the guard is refusing to
+                          auto-retry until a manual Reconnect happens. This
+                          is a known, easily-fixed state (tap one button),
+                          NOT the same as a real failure - it must not be
+                          surfaced to the user looking like something is
+                          broken.
+      "error"           - a genuine unexpected exception.
+    """
+    import login_guard
+
     start = time.time()
     result = None
     outcome = "error"
@@ -74,7 +83,11 @@ def _run(label: str, fn) -> tuple[float, object, str, str | None]:
         outcome = "skipped"
         message = str(exc)
         _log(f"{label}: skipped - {exc}")
-    except Exception as exc:  # e.g. session expired, needs re-login
+    except login_guard.LoginLocked as exc:
+        outcome = "login_required"
+        message = str(exc)
+        _log(f"{label}: login required - {exc}")
+    except Exception as exc:  # e.g. a real API error, bad data, etc.
         message = str(exc)
         _log(f"{label}: ERROR - {exc}")
     return time.time() - start, result, outcome, message
@@ -146,16 +159,23 @@ def _write_refresh_status(label: str, interval: int, next_run: float, outcome: s
     quietly doing nothing.
 
     outcome handling:
-      "ok"      -> lastAt AND lastAttemptAt both move forward; status="ok";
-                   any previous error is cleared.
-      "error"   -> only lastAttemptAt moves forward (lastAt stays at the last
-                   time real data actually changed); status="error" with the
-                   message attached.
-      "skipped" -> only lastAttemptAt moves forward; status/error are left
-                   exactly as they were. A deliberate skip (e.g. "market
-                   closed") is not a failure and must not clear a genuine
-                   prior error, but also isn't itself something to warn
-                   about.
+      "ok"              -> lastAt AND lastAttemptAt both move forward;
+                            status="ok"; any previous error is cleared.
+      "login_required"  -> only lastAttemptAt moves forward; status=
+                            "login_required" with the LoginLocked message
+                            attached. This is a known, one-tap-fixable state
+                            (Settings -> Reconnect Robinhood), NOT a real
+                            failure - kept as a distinct status so the
+                            frontend can show something calmer and more
+                            actionable than a generic error badge.
+      "error"           -> only lastAttemptAt moves forward (lastAt stays at
+                            the last time real data actually changed);
+                            status="error" with the message attached.
+      "skipped"         -> only lastAttemptAt moves forward; status/error
+                            are left exactly as they were. A deliberate skip
+                            (e.g. "market closed") is not a failure and must
+                            not clear a genuine prior error, but also isn't
+                            itself something to warn about.
 
     Best effort throughout: any failure here must never take down the main
     loop, since this is a nice-to-have display, not core functionality.
@@ -168,6 +188,9 @@ def _write_refresh_status(label: str, interval: int, next_run: float, outcome: s
         entry["lastAt"] = now_iso
         entry["status"] = "ok"
         entry.pop("error", None)
+    elif outcome == "login_required":
+        entry["status"] = "login_required"
+        entry["error"] = (message or "Login required")[:300]
     elif outcome == "error":
         entry["status"] = "error"
         entry["error"] = (message or "Unknown error")[:300]
