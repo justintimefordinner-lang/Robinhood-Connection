@@ -17,3 +17,17 @@ export function getVixSnapshot(): VixSnapshot | null {
   }
   return null;
 }
+
+// VixSnapshot carries no embedded timestamp, and VIX is refreshed on its own
+// cadence (manually, via a Claude Code session pulling VIX + SPY data) rather
+// than auto_push's regular interval - so snap.meta.generatedAt (the portfolio
+// snapshot's timestamp) would be the wrong thing to show as "last updated"
+// here; it could be fresh while VIX itself is days stale. The file's own
+// mtime is the only honest signal of when this data last changed.
+export function getVixUpdatedAt(): string | null {
+  try {
+    return fs.statSync(VIX_PATH).mtime.toISOString();
+  } catch {
+    return null;
+  }
+}
