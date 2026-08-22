@@ -61,6 +61,9 @@ it that way:
 ## Notes
 
 - Personal project, provided as-is. Not financial advice.
+- Maintained by [justintimefordinner-lang](https://github.com/justintimefordinner-lang)
+  (Hanks Made Investments), building on the upstream
+  [Jimmydaux/JerStock](https://github.com/Jimmydaux/JerStock).
 - Robinhood access goes through [`robin_stocks`](https://github.com/jmfernandes/robin_stocks),
   an unofficial library — see `databridge/README.md` for its known gaps
   and rate-limit considerations before relying on this for anything time-sensitive.
