@@ -4,14 +4,14 @@ Covers: the Next.js dashboard + the Robinhood bridge (Schwab bridge removed —
 Robinhood is now the sole data source), all running under **PM2** so they
 start on boot and restart on crash.
 
-Everything below assumes the project unpacked at `~/JerStock` (e.g.
-`/home/pi/JerStock`, or `/home/jimmydaux/JerStock` if that's your username —
+Everything below assumes the project unpacked at `~/Robinhood-Connection` (e.g.
+`/home/<you>/Robinhood-Connection`, or `/home/<you>/Robinhood-Connection` if that's your username —
 whatever `whoami` and `pwd` give you). Adjust paths if yours differ — the
 `cwd` fields in `ecosystem.config.js` at the repo root hardcode an absolute
 path and need to match wherever you actually unpacked the project.
 
 ```
-~/JerStock/
+~/Robinhood-Connection/
 ├── appfiles/
 ├── databridge/
 └── ecosystem.config.js
@@ -68,7 +68,7 @@ doesn't hurt.
 ## 2. Dashboard (`appfiles/`)
 
 ```bash
-cd ~/JerStock/appfiles
+cd ~/Robinhood-Connection/appfiles
 npm install
 npm run build     # the step swap matters for; give it a few minutes
 npm run start     # quick manual check — Ctrl+C once you've confirmed it works
@@ -80,10 +80,10 @@ in `ecosystem.config.js` — it's set to 3001, not Next's default 3000).
 **Run under PM2**, using the `ecosystem.config.js` at the repo root (it
 already defines all four processes — dashboard, live-data loop, daily
 history sync, daily earnings refresh). Open it first and fix the `cwd` paths
-if your checkout isn't at `/home/jimmydaux/JerStock`:
+if your checkout isn't at `/home/<you>/Robinhood-Connection`:
 
 ```bash
-cd ~/JerStock
+cd ~/Robinhood-Connection
 nano ecosystem.config.js   # update the four "cwd" lines to your actual path
 ```
 
@@ -102,14 +102,14 @@ Rebuilding after code changes: `npm run build` (inside `appfiles/`) then
 ## 3. Robinhood bridge (`databridge/`)
 
 ```bash
-cd ~/JerStock/databridge
+cd ~/Robinhood-Connection/databridge
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
 nano .env   # fill in ROBINHOOD_USERNAME / ROBINHOOD_PASSWORD, and:
-            # APP_DATA_DIR=/home/<you>/JerStock/appfiles/data
+            # APP_DATA_DIR=/home/<you>/Robinhood-Connection/appfiles/data
 ```
 
 **First-time auth**, interactively over SSH:
@@ -129,7 +129,7 @@ Brief + ladder refresh — `auto_push.py` handles all four on its own internal
 timers, see `databridge/README.md`):
 
 ```bash
-cd ~/JerStock
+cd ~/Robinhood-Connection
 pm2 start ecosystem.config.js --only databridge
 pm2 logs databridge
 ```

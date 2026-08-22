@@ -4,7 +4,7 @@ import path from "node:path";
 const nextConfig: NextConfig = {
   // Pin the Turbopack project root to this folder explicitly. Without this,
   // Turbopack infers the root from the nearest lockfile it finds — and if a
-  // stray package-lock.json exists at ~/JerStock (one level up, alongside
+  // stray package-lock.json exists at ~/Robinhood-Connection (one level up, alongside
   // the sibling `databridge` project), it can pick THAT as the root instead
   // of appfiles/. With the root set that high, the build scan expands to
   // include databridge/ too, and walks into databridge/.venv/bin/python — a

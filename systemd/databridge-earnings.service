@@ -5,5 +5,5 @@ Wants=databridge-history.service
 [Service]
 Type=oneshot
 User=jimmydaux
-WorkingDirectory=/home/jimmydaux/JerStock/databridge
-ExecStart=/home/jimmydaux/JerStock/databridge/.venv/bin/python fetch_earnings.py
+WorkingDirectory=/home/<you>/Robinhood-Connection/databridge
+ExecStart=/home/<you>/Robinhood-Connection/databridge/.venv/bin/python fetch_earnings.py

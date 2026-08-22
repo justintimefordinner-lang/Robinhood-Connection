@@ -1,4 +1,4 @@
-// appfiles and databridge are sibling folders under ~/JerStock. Both the
+// appfiles and databridge are sibling folders under ~/Robinhood-Connection. Both the
 // am-refresh route and the settings route need to find databridge/ (one to
 // spawn a script in it, the other to read/write its .env) — this centralizes
 // that resolution so there's one place to fix if your layout differs.

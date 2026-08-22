@@ -4,7 +4,7 @@ module.exports = {
       // Next.js dashboard — always-on, restarts on crash.
       // Was: systemd/appfiles.service
       name: "appfiles",
-      cwd: "/home/jimmydaux/JerStock/appfiles",
+      cwd: "/home/<you>/Robinhood-Connection/appfiles",
       script: "npm",
       args: "start",
       env: {
@@ -20,8 +20,8 @@ module.exports = {
       // Always-on, restarts on crash.
       // Was: systemd/databridge.service
       name: "databridge",
-      cwd: "/home/jimmydaux/JerStock/databridge",
-      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
+      cwd: "/home/<you>/Robinhood-Connection/databridge",
+      script: "/home/<you>/Robinhood-Connection/databridge/.venv/bin/python",
       args: "auto_push.py",
       interpreter: "none", // script IS the interpreter binary; don't let pm2 wrap it again
       autorestart: true,
@@ -37,8 +37,8 @@ module.exports = {
       // won't "catch up" on the next boot the way the systemd timer did.
       // Was: systemd/databridge-history.service + databridge-history.timer
       name: "databridge-history",
-      cwd: "/home/jimmydaux/JerStock/databridge",
-      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
+      cwd: "/home/<you>/Robinhood-Connection/databridge",
+      script: "/home/<you>/Robinhood-Connection/databridge/.venv/bin/python",
       args: "sync_trade_history.py",
       interpreter: "none",
       autorestart: false,
@@ -52,8 +52,8 @@ module.exports = {
       // deliberately NOT part of auto_push.py's per-minute loop. Same
       // stopped-in-between pattern as databridge-history above.
       name: "databridge-earnings",
-      cwd: "/home/jimmydaux/JerStock/databridge",
-      script: "/home/jimmydaux/JerStock/databridge/.venv/bin/python",
+      cwd: "/home/<you>/Robinhood-Connection/databridge",
+      script: "/home/<you>/Robinhood-Connection/databridge/.venv/bin/python",
       args: "fetch_earnings.py",
       interpreter: "none",
       autorestart: false,

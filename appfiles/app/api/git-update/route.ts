@@ -18,7 +18,7 @@ import path from "node:path";
 
 export const dynamic = "force-dynamic";
 
-// process.cwd() for the Next app is .../JerStock/appfiles, so the repo root
+// process.cwd() for the Next app is .../Robinhood-Connection/appfiles, so the repo root
 // (where .git lives) is one level up - same resolution style as
 // AM_REPORT_BRIDGE_DIR in the robinhood-reconnect route. APPFILES_DIR is
 // just process.cwd() itself, named explicitly so the build-step commands

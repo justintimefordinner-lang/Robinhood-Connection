@@ -22,7 +22,7 @@ import { AM_REQUEST_PATH, isAmRefreshPending } from "@/lib/am-report";
 
 export const dynamic = "force-dynamic";
 
-// appfiles and databridge are sibling folders under ~/JerStock.
+// appfiles and databridge are sibling folders under ~/Robinhood-Connection.
 // Override BRIDGE_DIR/AM_REPORT_PYTHON via env vars if your layout differs.
 const BRIDGE_DIR = process.env.AM_REPORT_BRIDGE_DIR || path.resolve(process.cwd(), "..", "databridge");
 const SCRIPT_PATH = path.join(BRIDGE_DIR, "am_report.py");

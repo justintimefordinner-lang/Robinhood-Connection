@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=jimmydaux
-WorkingDirectory=/home/jimmydaux/JerStock/appfiles
+WorkingDirectory=/home/<you>/Robinhood-Connection/appfiles
 # Use the production build, not `next dev` — dev mode recompiles on every
 # request and is noticeably slower on Pi-class hardware.
 ExecStart=/usr/bin/npm run start

@@ -1,4 +1,4 @@
-# JerStock update — full file set
+# Robinhood-Connection update — full file set
 
 ## IMPORTANT: delete the old favicon first
 
@@ -7,7 +7,7 @@ decoder requires the PNG inside an .ico to be RGBA and rejects it otherwise.
 This set does NOT include a favicon.ico — `app/icon.png` covers browser tabs
 on its own — so delete the old one:
 
-    cd ~/JerStock
+    cd ~/Robinhood-Connection
     rm -f appfiles/app/favicon.ico
 
 (If you committed it to git, `git rm appfiles/app/favicon.ico` instead so it
@@ -30,14 +30,14 @@ Unzip at the repo root; paths already match.
 
 ## Install
 
-    cd ~/JerStock
+    cd ~/Robinhood-Connection
     rm -f appfiles/app/favicon.ico
     # unzip this set over the repo root
     cd appfiles
     rm -rf .next          # clear the stale/corrupt build from the failed attempts
     npm install
     npm run build         # must succeed before restarting
-    cd ~/JerStock
+    cd ~/Robinhood-Connection
     pm2 restart all
     pm2 save
 
