@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Card, PageHeader, SectionTitle, Stat, Delta } from "@/components/ui";
-import { Sparkline, Donut } from "@/components/charts";
+import { Card, PageHeader, SectionTitle, Stat } from "@/components/ui";
+import { Donut } from "@/components/charts";
 import { HoldingsTable } from "@/components/HoldingsTable";
+import { HomeHero } from "@/components/HomeHero";
 import type { DonutSlice } from "@/components/charts";
 import { Amt, HideButton } from "@/components/privacy";
 import { AccountSwitcher } from "@/components/AccountSwitcher";
@@ -179,22 +180,13 @@ export default async function HomePage() {
         }
       />
 
-      {/* Hero */}
-      <Card className="mt-4 overflow-hidden">
-        <div className="px-4 pt-4">
-          <div className="text-xs text-muted">Total value</div>
-          <div className="tabular mt-0.5 text-3xl font-bold">
-            <Amt>{fmtMoney(summary.totalValue)}</Amt>
-          </div>
-          <div className="mt-1 text-sm">
-            <Delta value={last - first} pct={trendPct} />
-            <span className="ml-1 text-xs text-muted">trailing (illustrative)</span>
-          </div>
-        </div>
-        <div className="mt-2">
-          <Sparkline data={valueHistory} positive={trendPct >= 0} />
-        </div>
-      </Card>
+      {/* Hero — total value + press-and-drag value-history chart */}
+      <HomeHero
+        totalValue={summary.totalValue}
+        valueHistory={valueHistory}
+        trailingDelta={last - first}
+        trendPct={trendPct}
+      />
 
       {/* On tablet+ (md), the balances/CSP-access column and the VIX/positioning
           column sit side by side instead of stacking — same content, no change
