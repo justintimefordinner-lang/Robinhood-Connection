@@ -120,16 +120,14 @@ function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boo
         <span className={`tabular w-5 shrink-0 rounded px-0.5 py-0.5 text-center text-[9px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
           {row.tier}
         </span>
-        {/* Earnings has no column of its own: a put that spans the report tints the
-            ticker amber (with a superscript ER), and the expanded row carries the date. */}
+        {/* Earnings has no column of its own: a put that spans the report gets a small
+            ER tag on the ticker, and the expanded row carries the date. */}
         <span
-          className={`ml-2 w-12 shrink-0 text-sm font-semibold ${
-            row.erSpansPut ? "text-amber-300" : highlight ? "text-emerald-300" : ""
-          }`}
+          className={`ml-2 w-12 shrink-0 text-sm font-semibold ${highlight ? "text-emerald-300" : ""}`}
           title={row.erSpansPut ? `Put spans earnings${row.erDays != null ? ` · ${row.erDays}d` : ""}` : undefined}
         >
           {row.sym}
-          {row.erSpansPut && <sup className="ml-0.5 text-[7px] font-bold uppercase text-amber-200">ER</sup>}
+          {row.erSpansPut && <sup className="ml-0.5 text-[7px] font-bold uppercase text-muted">ER</sup>}
         </span>
         <span className="tabular ml-2 w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
         <span className="tabular ml-1.5 w-7 shrink-0 text-[11px] text-muted">{Math.round(row.score)}</span>
@@ -186,7 +184,7 @@ function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boo
             <span>IV Rank</span><span className="text-right text-text">{row.ivr != null ? `${Math.round(row.ivr)} (vs 1y)` : `building${row.ivrSamples ? ` ${row.ivrSamples}` : ""}`}</span>
             <span>Rel volume</span><span className="text-right text-text">{row.relVol != null ? `${row.relVol.toFixed(2)}×` : "—"}</span>
             <span>Beta</span><span className="text-right text-text">{row.beta?.toFixed(2) ?? "—"}</span>
-            {row.erDate && (<><span>Earnings</span><span className={`text-right ${row.erSpansPut ? "text-amber-300" : "text-text"}`}>{row.erDate}{row.erDays != null ? ` · ${row.erDays}d` : ""}{row.erSpansPut ? " · spans put" : ""}</span></>)}
+            {row.erDate && (<><span>Earnings</span><span className="text-right text-text">{row.erDate}{row.erDays != null ? ` · ${row.erDays}d` : ""}{row.erSpansPut ? " · spans put" : ""}</span></>)}
             {g && (<><span>Gamma</span><span className="text-right text-text">{g.net === "pos" ? "positive" : "negative"} · flip {g.flip != null ? `$${g.flip}` : "—"} · wall ${g.callWall ?? "—"}/{g.putWall ?? "—"}</span></>)}
             <span>Group</span><span className="text-right text-text">{row.group}</span>
           </div>
