@@ -42,7 +42,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="h-dvh overflow-hidden pointer-fine:flex pointer-fine:h-screen pointer-fine:items-center pointer-fine:justify-center pointer-fine:overflow-visible pointer-fine:bg-neutral-900 pointer-fine:py-6">
+      <body className="h-dvh overflow-hidden sm:flex sm:h-screen sm:items-center sm:justify-center sm:overflow-visible sm:bg-neutral-900 sm:py-6">
         {/* Real desktop mouse: frame the app like a phone for local preview
             (a resized browser window is still "pointer: fine", so it keeps
             getting the mockup). Real touch devices — phones AND tablets —
@@ -54,7 +54,7 @@ export default function RootLayout({
             scroll) — needed so the bottom nav can be a plain static flex
             item instead of `position: fixed`, which mobile browsers nudge
             around as their own address bar hides/shows during a scroll. */}
-        <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg pointer-fine:h-[860px] pointer-fine:max-h-[calc(100dvh-3rem)] pointer-fine:w-[400px] pointer-fine:rounded-[2.75rem] pointer-fine:border-[6px] pointer-fine:border-neutral-800 pointer-fine:shadow-2xl pointer-fine:shadow-black/60">
+        <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg sm:h-[860px] sm:max-h-[calc(100dvh-3rem)] sm:w-[400px] sm:rounded-[2.75rem] sm:border-[6px] sm:border-neutral-800 sm:shadow-2xl sm:shadow-black/60">
           <PrivacyProvider>
             <MarginModeProvider>
               {/* overflow-x-hidden: prevents any accidental horizontal
@@ -64,7 +64,7 @@ export default function RootLayout({
                   that gesture now lives on BottomNav instead of this
                   container, see SwipeNav.tsx's useSwipeGesture — but still
                   good hygiene to keep. */}
-              <SwipeNav className="mx-auto min-h-0 w-full max-w-md flex-1 overflow-y-auto overflow-x-hidden md:max-w-4xl lg:max-w-6xl pointer-fine:max-w-md">
+              <SwipeNav className="mx-auto min-h-0 w-full max-w-md flex-1 overflow-y-auto overflow-x-hidden">
                 {children}
               </SwipeNav>
               <BottomNav />

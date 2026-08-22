@@ -282,7 +282,7 @@ export function AmReportView({ report }: { report: AmReport }) {
       )}
 
       {/* Tablet+: regime and movers sit side by side instead of stacking. */}
-      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+      <div className="md:grid md:items-start md:gap-4">
         <div className="mt-3">
           <RegimeBanner r={report.regime} />
         </div>
@@ -333,7 +333,7 @@ export function AmReportView({ report }: { report: AmReport }) {
       )}
 
       {/* Tablet+: landmines and the heat map sit side by side. */}
-      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+      <div className="md:grid md:items-start md:gap-4">
         {report.landmines && report.landmines.length > 0 && (
           <div>
             <h3 className="mb-1 mt-5 px-1 text-sm font-semibold text-amber-200">⚠ Landmines</h3>

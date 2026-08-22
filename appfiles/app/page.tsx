@@ -14,14 +14,12 @@ import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
 import { assessVix, REGIME_COLORS } from "@/lib/vix";
 import {
-  buildAlerts,
   cspCollateral,
   equityPnl,
   equityValue,
   fmtMoney,
   isCashEquivalent,
   isCashSettledIndex,
-  LEVEL_STYLES,
   optionMarketValue,
   optionPnl,
   spreadRiskCapital,
@@ -49,7 +47,6 @@ export default async function HomePage() {
   const { accounts, meta } = snap;
   const { id, data } = await getSelectedAccount(snap);
   const { summary, equities, options, valueHistory } = data;
-  const alerts = buildAlerts(options);
 
   const vixSnap = getVixSnapshot();
   const vix = vixSnap ? assessVix(vixSnap) : null;
@@ -202,7 +199,7 @@ export default async function HomePage() {
       {/* On tablet+ (md), the balances/CSP-access column and the VIX/positioning
           column sit side by side instead of stacking — same content, no change
           on phone widths. */}
-      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+      <div className="md:grid md:items-start md:gap-4">
         <div>
           {/* Balances — Stocks/Options/Crypto drill into their summaries */}
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -321,7 +318,7 @@ export default async function HomePage() {
       </div>
 
       {/* Allocation + Action center share a row on tablet+ too. */}
-      <div className="md:grid md:grid-cols-2 md:items-start md:gap-4">
+      <div className="md:grid md:items-start md:gap-4">
         <div>
           <SectionTitle>Allocation</SectionTitle>
           <Card className="px-4 py-4">
@@ -355,30 +352,6 @@ export default async function HomePage() {
           </Card>
         </div>
 
-        <div>
-          <SectionTitle action={<span className="text-[11px] text-muted">{alerts.length} items</span>}>
-            Action center
-          </SectionTitle>
-          <div className="space-y-2">
-            {alerts.length === 0 && (
-              <Card className="px-4 py-5 text-center text-sm text-muted">Nothing needs attention.</Card>
-            )}
-            {alerts.map((a, i) => {
-              const s = LEVEL_STYLES[a.level];
-              return (
-                <Link key={i} href={a.href}>
-                  <Card className="flex items-start gap-3 px-4 py-3 active:bg-surface-2">
-                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{a.title}</div>
-                      <div className="mt-0.5 text-xs text-muted">{a.body}</div>
-                    </div>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* Holdings by ticker — a table wants the full width, not a column */}
