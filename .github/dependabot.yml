@@ -1,0 +1,17 @@
+# Dependabot version updates — keeps the dashboard (npm) and data bridge (pip) deps current.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # Next.js dashboard
+  - package-ecosystem: "npm"
+    directory: "/appfiles"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Python data bridge
+  - package-ecosystem: "pip"
+    directory: "/databridge"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
