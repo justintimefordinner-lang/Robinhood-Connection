@@ -3,7 +3,7 @@
 // Briefing tab — renders data/am_report.json: the regime gate up top, the ranked
 // CSP board (tap a row for the full read), the VRP heat map by group, and a
 // collapsible steer-clear list of names that failed the gates.
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Card } from "@/components/ui";
 import { DataRefresh } from "@/components/DataRefresh";
 import { TIER_STYLE, VRP_STYLE } from "@/lib/am-report-types";
@@ -111,17 +111,17 @@ function BoardHeaderRow() {
   );
 }
 
-function BoardRow({ row }: { row: AmBoardRow }) {
+function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boolean }) {
   const [open, setOpen] = useState(false);
   const g = row.gamma;
   const c = row.chain;
   return (
-    <div className="px-3 py-2.5">
+    <div className={`px-3 py-2.5 ${highlight ? "bg-emerald-500/10" : ""}`}>
       <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center text-left">
         <span className={`tabular w-5 shrink-0 rounded px-0.5 py-0.5 text-center text-[9px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
           {row.tier}
         </span>
-        <span className="ml-2 w-12 shrink-0 text-sm font-semibold">{row.sym}</span>
+        <span className={`ml-2 w-12 shrink-0 text-sm font-semibold ${highlight ? "text-emerald-300" : ""}`}>{row.sym}</span>
         <span className="tabular ml-2 w-14 shrink-0 text-[11px] text-muted">{row.last != null ? `$${row.last.toFixed(2)}` : "—"}</span>
         <span className="tabular ml-1.5 w-7 shrink-0 text-[11px] text-muted">{Math.round(row.score)}</span>
         <span className={`ml-1.5 w-8 shrink-0 text-[11px] font-medium ${VRP_STYLE[row.vrp]}`}>{row.vrp}</span>
@@ -269,9 +269,27 @@ function Movers({ movers }: { movers: NonNullable<AmReport["movers"]> }) {
   );
 }
 
-export function AmReportView({ report }: { report: AmReport }) {
+export function AmReportView({
+  report,
+  underweight,
+  book,
+}: {
+  report: AmReport;
+  underweight?: string[];
+  book?: string[];
+}) {
   const [showSteer, setShowSteer] = useState(false);
   const sample = report.meta.source === "sample";
+  // A board row is green-flagged when it's an actionable CSP candidate: either
+  // already underweight (<8.5%) in the book — room to add — OR a high-conviction
+  // setup (score > 80) you don't hold at all yet. Sets are rebuilt here since a
+  // Set can't cross the RSC boundary.
+  const underweightSet = useMemo(() => new Set(underweight ?? []), [underweight]);
+  const bookSet = useMemo(() => new Set(book ?? []), [book]);
+  const isFlagged = (row: AmBoardRow) => {
+    const sym = row.sym.toUpperCase();
+    return underweightSet.has(sym) || (row.score > 80 && !bookSet.has(sym));
+  };
 
   return (
     <div>
@@ -291,7 +309,8 @@ export function AmReportView({ report }: { report: AmReport }) {
 
       <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">CSP Board</h3>
       <p className="mb-2 px-1 text-[10px] text-muted">
-        Approved names past the wheel gates · ranked by tier then setup score · tap a row for the ladder
+        Approved names past the wheel gates · ranked by tier then setup score · tap a row for the ladder ·{" "}
+        <span className="text-emerald-300">green</span> = underweight (&lt;8.5%) in your book, or a high-conviction setup (score &gt;80) you don&apos;t hold yet
         {report.meta.ladderAsOf && (
           <>
             {" · premiums "}
@@ -320,7 +339,7 @@ export function AmReportView({ report }: { report: AmReport }) {
           <Card className="min-w-max divide-y divide-border p-0">
             <BoardHeaderRow />
             {report.board.map((row) => (
-              <BoardRow key={row.sym} row={row} />
+              <BoardRow key={row.sym} row={row} highlight={isFlagged(row)} />
             ))}
           </Card>
         </div>

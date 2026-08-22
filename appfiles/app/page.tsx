@@ -9,6 +9,8 @@ import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { PortfolioFit } from "@/components/PortfolioFit";
 import { AvailableCash } from "@/components/AvailableCash";
 import { getSnapshot } from "@/lib/snapshot";
+import { getAmReport } from "@/lib/am-report";
+import { computeHoldings } from "@/lib/holdings";
 import { getSelectedAccount } from "@/lib/account";
 import { getVixSnapshot } from "@/lib/vix-data";
 import { getRefreshStatus } from "@/lib/refresh-status";
@@ -97,38 +99,12 @@ export default async function HomePage() {
   // calls add nothing; the shares are already in stock value.) % is share of the
   // whole account, so a ticker you only touch via CSPs/LEAPs still shows up. Each
   // ticker keeps its per-strategy split so the row can expand and link out.
-  const STRAT_META: Record<string, { label: string; route: string }> = {
-    stock: { label: "Stock", route: "/stocks" },
-    csp: { label: "CSPs", route: "/options/csp" },
-    leap: { label: "LEAPs", route: "/options/leap" },
-    spread: { label: "Spreads", route: "/options/spread" },
-  };
-  const byTicker = new Map<string, Map<string, number>>();
-  const addCap = (sym: string, key: string, v: number) => {
-    if (v <= 0) return;
-    const m = byTicker.get(sym) ?? new Map<string, number>();
-    m.set(key, (m.get(key) ?? 0) + v);
-    byTicker.set(sym, m);
-  };
-  for (const e of equities) if (!isCashEquivalent(e.symbol)) addCap(e.symbol, "stock", equityValue(e));
-  for (const o of options) {
-    if (o.kind === "leap-call" || o.kind === "leap-put-hedge") addCap(o.symbol, "leap", optionMarketValue(o));
-    else if (o.kind === "csp" && !isCashSettledIndex(o.symbol)) addCap(o.symbol, "csp", cspCollateral(o));
-  }
-  for (const sym of new Set(
-    options.filter((o) => o.kind === "put-spread" || o.kind === "call-spread").map((o) => o.symbol),
-  )) {
-    addCap(sym, "spread", spreadRiskCapital(options.filter((o) => o.symbol === sym && (o.kind === "put-spread" || o.kind === "call-spread"))));
-  }
-  const holdings = [...byTicker.entries()]
-    .map(([symbol, m]) => {
-      const value = [...m.values()].reduce((s, v) => s + v, 0);
-      const breakout = [...m.entries()]
-        .map(([key, v]) => ({ key, label: STRAT_META[key]?.label ?? key, value: v, route: STRAT_META[key]?.route ?? "/" }))
-        .sort((a, b) => b.value - a.value);
-      return { symbol, value, pct: summary.totalValue > 0 ? value / summary.totalValue : 0, breakout };
-    })
-    .sort((a, b) => b.value - a.value);
+  // (Shared with the Brief via lib/holdings so "underweight" matches on both.)
+  const holdings = computeHoldings(data);
+  // CSP-board tickers from the Brief, so the Holdings table can tag names that are
+  // both underweight (<8.5%) and a live wheel candidate. Array (not Set) to cross
+  // the server→client boundary; the table rebuilds a Set for lookups.
+  const cspBoard = (getAmReport()?.board ?? []).map((r) => r.sym.toUpperCase());
 
   const equityPnlTotal = equities.reduce((s, e) => s + equityPnl(e), 0);
   const optionsPnlTotal = options.reduce((s, o) => s + optionPnl(o), 0);
@@ -349,9 +325,10 @@ export default async function HomePage() {
       {/* Holdings by ticker — a table wants the full width, not a column */}
       <p className="mb-2 mt-3 px-1 text-[11px] text-muted">
         Capital per ticker (stocks + CSPs + LEAPs + spreads) — <span className="font-medium text-orange-300">over 10%</span> and{" "}
-        <span className="font-medium text-emerald-300">under 5%</span> of your account highlighted.
+        <span className="font-medium text-emerald-300">under 5%</span> highlighted; a{" "}
+        <span className="font-medium text-emerald-300">CSP</span> tag marks names under 8.5% that are also on the CSP board.
       </p>
-      <HoldingsTable rows={holdings} />
+      <HoldingsTable rows={holdings} cspBoard={cspBoard} />
 
       <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
         Data is a live snapshot from your Robinhood account. The trend line fills in as
