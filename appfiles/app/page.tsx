@@ -10,7 +10,9 @@ import { PortfolioFit } from "@/components/PortfolioFit";
 import { AvailableCash } from "@/components/AvailableCash";
 import { getSnapshot } from "@/lib/snapshot";
 import { getAmReport } from "@/lib/am-report";
+import { getBtcQuote, fmtBtc } from "@/lib/btc-data";
 import { computeHoldings } from "@/lib/holdings";
+import { dailyThetaBreakdown } from "@/lib/theta";
 import { getSelectedAccount } from "@/lib/account";
 import { getVixSnapshot } from "@/lib/vix-data";
 import { getRefreshStatus } from "@/lib/refresh-status";
@@ -53,6 +55,9 @@ export default async function HomePage() {
 
   const vixSnap = getVixSnapshot();
   const vix = vixSnap ? assessVix(vixSnap) : null;
+  // Latest BTC spot for the header stat stack. Null (offline / slow) just drops
+  // the line — see lib/btc-data.ts.
+  const btc = await getBtcQuote();
 
   // Allocation by capital deployed — break "Options" into its strategies. LEAP &
   // hedge by market value; CSPs by collateral (the cash securing them), carved out
@@ -67,6 +72,9 @@ export default async function HomePage() {
   // Capital deployed in options strategies: long LEAP/hedge value + CSP collateral
   // + spread defined risk. (Distinct from summary.optionsValue, the net mark.)
   const optionsCapital = leapCallsValue + hedgeValue + cspCollateralValue + spreadRisk;
+  // Daily theta across the whole options book, split credit (premium collected)
+  // vs debit (premium paid) — replaces the old aggregate Crypto tile.
+  const theta = dailyThetaBreakdown(options);
   const freeCash = Math.max(
     0,
     summary.totalValue - summary.equityValue - leapCallsValue - hedgeValue - cspCollateralValue - spreadRisk - summary.cryptoValue,
@@ -139,7 +147,46 @@ export default async function HomePage() {
           </span>
         }
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-center gap-2">
+            {/* Market stat stack — BTC spot sits directly above S5FI. Skipped
+                entirely when neither number is available, so the icon row
+                doesn't inherit the stack's gap. */}
+            {(btc || vix?.s5fi != null) && (
+              <div className="flex flex-col items-center gap-1">
+                {btc && (
+                  <span
+                    className="tabular text-[11px] leading-none text-muted"
+                    title={`Bitcoin ${fmtBtc(btc.price)}${
+                      btc.changePct != null
+                        ? ` · ${btc.changePct >= 0 ? "+" : "−"}${(Math.abs(btc.changePct) * 100).toFixed(2)}% today`
+                        : ""
+                    } · ${btc.source}`}
+                  >
+                    BTC:{" "}
+                    <span
+                      className={`font-semibold ${
+                        btc.changePct == null ? "text-text" : btc.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {fmtBtc(btc.price)}
+                    </span>
+                  </span>
+                )}
+                {vix?.s5fi != null && (
+                  <span className="tabular text-[11px] leading-none text-muted">
+                    S5FI:{" "}
+                    <span
+                      className={`font-semibold ${
+                        vix.s5fi >= 80 ? "text-red-400" : vix.s5fi >= 75 ? "text-orange-400" : "text-text"
+                      }`}
+                    >
+                      {vix.s5fi.toFixed(1)}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
             <Link
               href="/settings"
               aria-label="Settings"
@@ -152,6 +199,7 @@ export default async function HomePage() {
               </svg>
             </Link>
             <HideButton />
+            </div>
           </div>
         }
       />
@@ -213,14 +261,23 @@ export default async function HomePage() {
                 pct={`${Math.round(marginPct * 100)}%`}
               />
             )}
-            <Link href="/crypto" className={`block active:opacity-80 ${marginLimit > 0 ? "col-span-2" : ""}`}>
-              <Stat
-                label="Crypto ›"
-                value={<Amt>{fmtMoney(summary.cryptoValue)}</Amt>}
-                sub="aggregate"
-                pct={share(summary.cryptoValue)}
-              />
-            </Link>
+            <Stat
+              label="Total theta / day"
+              value={<Amt>{`${theta.total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(theta.total))}`}</Amt>}
+              tone={theta.total >= 0 ? "pos" : "neg"}
+              sub={
+                <>
+                  Credit{" "}
+                  <span className="text-emerald-400">
+                    <Amt>{fmtMoney(theta.credit)}</Amt>
+                  </span>{" "}
+                  · Debit{" "}
+                  <span className="text-rose-400">
+                    <Amt>{fmtMoney(Math.abs(theta.debit))}</Amt>
+                  </span>
+                </>
+              }
+            />
           </div>
 
           {/* Quick access — CSPs are the core strategy, so surface them up top. */}
@@ -301,7 +358,15 @@ export default async function HomePage() {
                       <div className="flex items-center justify-between text-xs">
                         <span className="flex items-center gap-2">
                           <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
-                          {s.label}
+                          {/* Crypto lost its own tile to the theta tracker, so the legend
+                              keeps the per-coin breakdown reachable. */}
+                          {s.label === "Crypto" ? (
+                            <Link href="/crypto" className="underline decoration-dotted underline-offset-2 active:opacity-70">
+                              {s.label} ›
+                            </Link>
+                          ) : (
+                            s.label
+                          )}
                         </span>
                         <span className={`tabular ${flag ? "font-semibold text-red-400" : "text-muted"}`}>
                           {(pct * 100).toFixed(0)}%
