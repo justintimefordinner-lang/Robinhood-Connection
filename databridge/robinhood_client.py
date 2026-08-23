@@ -806,8 +806,14 @@ def get_gamma_walls(
             flip = k
             break
         cum, prev_k = nxt, k
-    call_wall = max(call_oi, key=call_oi.get) if call_oi else None
-    put_wall = max(put_oi, key=put_oi.get) if put_oi else None
+    # Walls are read as resistance/support, so they only mean anything on the right
+    # side of spot: a stock that has run past its biggest call-OI strike has no
+    # "resistance" there any more. Restrict each side accordingly, falling back to
+    # the unrestricted max if a side has nothing beyond spot.
+    calls_above = {k: v for k, v in call_oi.items() if k > spot}
+    puts_below = {k: v for k, v in put_oi.items() if k < spot}
+    call_wall = max(calls_above or call_oi, key=(calls_above or call_oi).get) if call_oi else None
+    put_wall = max(puts_below or put_oi, key=(puts_below or put_oi).get) if put_oi else None
     net = sum(gex.values())
     return {
         "flip": round(flip, 2) if flip else None,
