@@ -792,35 +792,59 @@ def get_covered_calls(
         used.add(exp)
         try:
             calls = rh.options.find_options_by_expiration(symbol, expirationDate=exp, optionType="call") or []
-            strikes = sorted({_to_float(c.get("strike_price")) for c in calls if c.get("strike_price")})
         except Exception:
             continue
-        otm = [k for k in strikes if k and k > spot][:candidates_per_exp]
-        if not otm:
+        if not calls:
             continue
 
         best = None  # (|delta - target|, strike, row)
-        for k in otm:
-            try:
-                md = rh.options.get_option_market_data(symbol, exp, str(k), "call")
-            except Exception:
-                md = None
-            if throttle_sec:
-                _time.sleep(throttle_sec)
-            row = md
-            while isinstance(row, list):
-                if not row:
-                    row = None
-                    break
-                row = row[0]
+
+        # find_options_by_expiration already carries per-strike market data on most
+        # robin_stocks versions, so prefer selecting straight from it: that sees EVERY
+        # strike (the true target-delta call drifts further OTM as tenor grows, so a
+        # window of the few strikes nearest spot would settle for a near-ATM call) and
+        # costs one request instead of one per strike.
+        for row in calls:
             if not isinstance(row, dict):
                 continue
+            k = _to_float(row.get("strike_price"))
             dl = _to_float(row.get("delta"))
-            if dl is None:
+            if k is None or dl is None or k <= spot:
                 continue
             diff = abs(abs(dl) - target_delta)
             if best is None or diff < best[0]:
                 best = (diff, k, row)
+
+        # Older versions return instruments only (no greeks) — fall back to quoting a
+        # band of OTM strikes. The band widens with tenor for the same reason.
+        if best is None:
+            strikes = sorted({_to_float(c.get("strike_price")) for c in calls if c.get("strike_price")})
+            width = 0.06 + 0.004 * dte  # ~6% OTM at a week, ~18% at a month
+            band = [k for k in strikes if k and spot < k <= spot * (1 + width)]
+            if len(band) > candidates_per_exp:
+                step = (len(band) - 1) / (candidates_per_exp - 1)
+                band = [band[round(i * step)] for i in range(candidates_per_exp)]
+            for k in band:
+                try:
+                    md = rh.options.get_option_market_data(symbol, exp, str(k), "call")
+                except Exception:
+                    md = None
+                if throttle_sec:
+                    _time.sleep(throttle_sec)
+                row = md
+                while isinstance(row, list):
+                    if not row:
+                        row = None
+                        break
+                    row = row[0]
+                if not isinstance(row, dict):
+                    continue
+                dl = _to_float(row.get("delta"))
+                if dl is None:
+                    continue
+                diff = abs(abs(dl) - target_delta)
+                if best is None or diff < best[0]:
+                    best = (diff, k, row)
         if best is None:
             continue
 
