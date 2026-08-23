@@ -738,6 +738,111 @@ def get_option_chain(
     return {"putExpDateMap": put_map, "callExpDateMap": call_map, "underlyingPrice": spot}
 
 
+def get_covered_calls(
+    rh, symbol: str, spot: float | None,
+    target_dtes: tuple[int, ...] = (7, 14, 21, 28),
+    target_delta: float = 0.30,
+    candidates_per_exp: int = 5,
+    throttle_sec: float = 0.2,
+) -> list[dict[str, Any]] | None:
+    """The ~`target_delta` call at the expirations nearest each target DTE — the
+    covered-call ladder shown on a holding's expanded row.
+
+    get_option_chain deliberately fetches a SINGLE expiration (Robinhood has no
+    batch chain endpoint, so a multi-expiration pull over the whole approved board
+    would invite rate limits). A ladder needs one call per tenor, so this walks
+    several expirations — but only ever for stock you actually hold 100+ shares of,
+    which is a handful of tickers, and only a few OTM strikes per expiration.
+
+    Strike shortlist: a ~30-delta call is typically a few percent OTM, so candidates
+    are the strikes just above spot. Delta isn't known until the quote comes back, so
+    this is a price proxy — we pull `candidates_per_exp` of them and keep whichever
+    lands closest to `target_delta`. Returns None on any failure so the caller keeps
+    whatever it had cached.
+    """
+    import time as _time
+    from datetime import date as _date
+
+    if not spot or spot <= 0:
+        return None
+    try:
+        chains = rh.options.get_chains(symbol)
+    except Exception:
+        return None
+    exp_dates = (chains or {}).get("expiration_dates") or []
+    if not exp_dates:
+        return None
+
+    dated: list[tuple[int, str]] = []
+    for exp in exp_dates:
+        try:
+            dte = (_date.fromisoformat(exp) - _date.today()).days
+        except ValueError:
+            continue
+        if dte >= 0:
+            dated.append((dte, exp))
+    if not dated:
+        return None
+
+    out: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for target in target_dtes:
+        pool = [d for d in dated if d[1] not in used] or dated
+        dte, exp = min(pool, key=lambda d: abs(d[0] - target))
+        used.add(exp)
+        try:
+            calls = rh.options.find_options_by_expiration(symbol, expirationDate=exp, optionType="call") or []
+            strikes = sorted({_to_float(c.get("strike_price")) for c in calls if c.get("strike_price")})
+        except Exception:
+            continue
+        otm = [k for k in strikes if k and k > spot][:candidates_per_exp]
+        if not otm:
+            continue
+
+        best = None  # (|delta - target|, strike, row)
+        for k in otm:
+            try:
+                md = rh.options.get_option_market_data(symbol, exp, str(k), "call")
+            except Exception:
+                md = None
+            if throttle_sec:
+                _time.sleep(throttle_sec)
+            row = md
+            while isinstance(row, list):
+                if not row:
+                    row = None
+                    break
+                row = row[0]
+            if not isinstance(row, dict):
+                continue
+            dl = _to_float(row.get("delta"))
+            if dl is None:
+                continue
+            diff = abs(abs(dl) - target_delta)
+            if best is None or diff < best[0]:
+                best = (diff, k, row)
+        if best is None:
+            continue
+
+        _, strike, row = best
+        mark = _to_float(row.get("mark_price") or row.get("adjusted_mark_price"))
+        if mark is None:
+            bid, ask = _to_float(row.get("bid_price")) or 0.0, _to_float(row.get("ask_price")) or 0.0
+            mark = (bid + ask) / 2
+        prem_pct = (mark / spot * 100) if spot else 0.0
+        out.append({
+            "targetDte": target,
+            "dte": dte,
+            "strike": round(strike, 2),
+            "delta": round(abs(_to_float(row.get("delta")) or 0.0), 3),
+            "mark": round(mark, 2),
+            "premPct": round(prem_pct, 2),
+            "annPct": round(prem_pct * 365 / dte, 1) if dte > 0 else None,
+            "oi": int(_to_float(row.get("open_interest")) or 0),
+        })
+    return out or None
+
+
 # ---------------------------------------------------------------------------
 # VIX cash-allocation framework — pure, unchanged from schwab_client.py.
 # ---------------------------------------------------------------------------

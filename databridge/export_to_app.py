@@ -184,6 +184,58 @@ def map_option(p: dict[str, Any], underlying_price: float | None, stock_day: dic
     return opt
 
 
+COVERED_CALL_CACHE_FILE = "covered_calls.json"
+CC_TTL_SEC = 300  # re-pull a ticker's ladder at most every ~5 minutes
+CC_MIN_SHARES = 100  # one contract's worth — below this you can't write a call
+
+
+def _cc_market_open() -> bool:
+    """Rough US regular-session gate (weekday, 9:30–16:00 ET). Ladders only refresh
+    while the market is open; off-hours we serve the last cached pull, since option
+    quotes are stale anyway and every strike costs an API call."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return True  # no tz data — don't block refreshes
+    if now.weekday() >= 5:
+        return False
+    mins = now.hour * 60 + now.minute
+    return 570 <= mins < 960
+
+
+def _enrich_covered_calls(rh, account_data: dict, cache: dict, now_ts: float, market_open: bool) -> None:
+    """Attach the ~30-delta covered-call ladder to every holding of >=100 shares.
+
+    Each ticker's ladder is cached with a short TTL; off-hours we reuse whatever was
+    cached rather than spending calls on stale quotes. A failed pull keeps the
+    previous ladder instead of blanking the row.
+    """
+    try:
+        import robinhood_client as rc
+    except Exception:
+        return
+    for e in account_data.get("equities", []):
+        sym, spot = e.get("symbol"), e.get("price")
+        if not sym or not spot or (e.get("qty") or 0) < CC_MIN_SHARES:
+            continue
+        ent = cache.get(sym) or {}
+        fresh = ent.get("ts") is not None and (now_ts - ent["ts"]) < CC_TTL_SEC
+        if fresh or (not market_open and ent.get("cc")):
+            if ent.get("cc"):
+                e["coveredCalls"] = ent["cc"]
+            continue
+        try:
+            cc = rc.get_covered_calls(rh, sym, spot)
+        except Exception:
+            cc = None
+        if cc:
+            cache[sym] = {"ts": now_ts, "cc": cc}
+            e["coveredCalls"] = cc
+        elif ent.get("cc"):
+            e["coveredCalls"] = ent["cc"]  # bad pull — keep the last good ladder
+
+
 def _enrich_price_history(rh, account_data: dict, days: int = 7) -> None:
     """Attach the last ~`days` daily closes to each holding, for the mini chart in
     the Stocks page's expanded row. Best-effort per ticker: a symbol whose candles
@@ -349,6 +401,15 @@ def main() -> None:
     app_accounts: list[dict[str, Any]] = []
     data_by_account: dict[str, dict[str, Any]] = {}
 
+    # Covered-call ladders: short-TTL cache on disk, refreshed only in market hours.
+    try:
+        with open(os.path.join(data_dir, COVERED_CALL_CACHE_FILE), encoding="utf-8") as f:
+            cc_cache = json.load(f)
+    except Exception:
+        cc_cache = {}
+    cc_now = datetime.now().timestamp()
+    cc_market_open = _cc_market_open()
+
     for i, acct in enumerate(accounts):
         acct_id = acct["hash"]
         last4 = (acct.get("number") or "")[-4:]
@@ -365,13 +426,24 @@ def main() -> None:
             "isDefault": i == 0,
         })
         data_by_account[acct_id] = build_account_data(rh, snap, points)
+        _enrich_covered_calls(rh, data_by_account[acct_id], cc_cache, cc_now, cc_market_open)
 
     snapshot = build_snapshot(app_accounts, data_by_account, prices_as_of)
+    # Tell the app when the ladders next refresh (null off-hours, when they don't).
+    snapshot["meta"]["coveredCallsNextAt"] = (
+        datetime.fromtimestamp(cc_now + CC_TTL_SEC, timezone.utc).isoformat(timespec="seconds")
+        if cc_market_open else None
+    )
 
     out_path = os.path.join(data_dir, SNAPSHOT_FILE)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
     save_history(data_dir, history)
+    try:
+        with open(os.path.join(data_dir, COVERED_CALL_CACHE_FILE), "w", encoding="utf-8") as f:
+            json.dump(cc_cache, f)
+    except OSError:
+        pass  # cache is an optimization — never fail the export over it
 
     n_pos = sum(len(d["equities"]) + len(d["options"]) for d in data_by_account.values())
     print(f"Wrote {out_path}  ({len(app_accounts)} account(s), {n_pos} positions).")
