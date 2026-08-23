@@ -184,6 +184,27 @@ def map_option(p: dict[str, Any], underlying_price: float | None, stock_day: dic
     return opt
 
 
+def _enrich_price_history(rh, account_data: dict, days: int = 7) -> None:
+    """Attach the last ~`days` daily closes to each holding, for the mini chart in
+    the Stocks page's expanded row. Best-effort per ticker: a symbol whose candles
+    fail to load simply goes without a chart rather than failing the export."""
+    try:
+        import robinhood_client as rc
+    except Exception:
+        return
+    for e in account_data.get("equities", []):
+        sym = e.get("symbol")
+        if not sym:
+            continue
+        try:
+            candles = rc.get_price_history(rh, sym, days=max(days * 3, 40)) or []
+        except Exception:
+            continue
+        closes = [c["close"] for c in candles if c.get("close") is not None]
+        if len(closes) >= 2:
+            e["priceHistory"] = [round(c, 2) for c in closes[-days:]]
+
+
 def build_account_data(
     rh,
     snap: dict[str, Any],
@@ -211,6 +232,9 @@ def build_account_data(
     except Exception:
         quotes = {}
     options = [map_option(p, quotes.get(p.get("ticker")), stock_day) for p in opt_positions]
+
+    # Daily closes behind each holding's expanded-row mini chart.
+    _enrich_price_history(rh, {"equities": equities})
 
     crypto_raw = []
     try:
