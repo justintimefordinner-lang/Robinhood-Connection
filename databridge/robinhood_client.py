@@ -738,6 +738,85 @@ def get_option_chain(
     return {"putExpDateMap": put_map, "callExpDateMap": call_map, "underlyingPrice": spot}
 
 
+def get_gamma_walls(
+    rh, symbol: str, spot: float | None, target_dte: int = 30,
+) -> dict[str, Any] | None:
+    """Naive dealer-gamma structure for one near-term expiration.
+
+    Per strike, call gamma x OI counts positive and put gamma x OI negative (the
+    standard "dealers are short customer puts" convention). Returns the zero-gamma
+    flip strike, the highest-call-OI strike (resistance) and the highest-put-OI
+    strike (support), plus the net sign.
+
+    Reads both sides via find_options_by_expiration, which carries gamma and open
+    interest for EVERY strike in one request per side — a fuller profile than
+    get_option_chain's deliberately narrow strike window, and only two calls.
+    Returns None on any failure so the caller keeps whatever it had cached.
+    """
+    from datetime import date as _date
+
+    if not spot or spot <= 0:
+        return None
+    try:
+        chains = rh.options.get_chains(symbol)
+    except Exception:
+        return None
+    exp_dates = (chains or {}).get("expiration_dates") or []
+    dated = []
+    for exp in exp_dates:
+        try:
+            dte = (_date.fromisoformat(exp) - _date.today()).days
+        except ValueError:
+            continue
+        if dte >= 0:
+            dated.append((dte, exp))
+    if not dated:
+        return None
+    _, exp = min(dated, key=lambda d: abs(d[0] - target_dte))
+
+    call_oi: dict[float, float] = {}
+    put_oi: dict[float, float] = {}
+    gex: dict[float, float] = {}
+    for side, sign, oi_book in (("call", 1.0, call_oi), ("put", -1.0, put_oi)):
+        try:
+            rows = rh.options.find_options_by_expiration(symbol, expirationDate=exp, optionType=side) or []
+        except Exception:
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            k = _to_float(row.get("strike_price"))
+            if k is None:
+                continue
+            k = round(k, 2)
+            oi = _to_float(row.get("open_interest")) or 0.0
+            gm = _to_float(row.get("gamma")) or 0.0
+            oi_book[k] = oi_book.get(k, 0.0) + oi
+            gex[k] = gex.get(k, 0.0) + sign * gm * oi * 100 * spot * spot * 0.01
+    if not gex:
+        return None
+
+    # Flip = the strike where cumulative gamma exposure crosses zero.
+    cum = 0.0
+    flip = None
+    prev_k = None
+    for k in sorted(gex):
+        nxt = cum + gex[k]
+        if prev_k is not None and (cum <= 0 < nxt or cum >= 0 > nxt):
+            flip = k
+            break
+        cum, prev_k = nxt, k
+    call_wall = max(call_oi, key=call_oi.get) if call_oi else None
+    put_wall = max(put_oi, key=put_oi.get) if put_oi else None
+    net = sum(gex.values())
+    return {
+        "flip": round(flip, 2) if flip else None,
+        "callWall": round(call_wall, 2) if call_wall else None,
+        "putWall": round(put_wall, 2) if put_wall else None,
+        "net": "pos" if net >= 0 else "neg",
+    }
+
+
 def get_covered_calls(
     rh, symbol: str, spot: float | None,
     target_dtes: tuple[int, ...] = (7, 14, 21, 28),

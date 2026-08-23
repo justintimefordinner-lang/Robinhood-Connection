@@ -205,35 +205,47 @@ def _cc_market_open() -> bool:
 
 
 def _enrich_covered_calls(rh, account_data: dict, cache: dict, now_ts: float, market_open: bool) -> None:
-    """Attach the ~30-delta covered-call ladder to every holding of >=100 shares.
+    """Attach the ~30-delta covered-call ladder AND the dealer-gamma walls to every
+    holding of >=100 shares — both come from the same cached pass, since they read
+    the same option data.
 
-    Each ticker's ladder is cached with a short TTL; off-hours we reuse whatever was
-    cached rather than spending calls on stale quotes. A failed pull keeps the
-    previous ladder instead of blanking the row.
+    Each ticker is cached with a short TTL; off-hours we reuse whatever was cached
+    rather than spending calls on stale quotes. A failed pull keeps the previous
+    values instead of blanking the row.
     """
     try:
         import robinhood_client as rc
     except Exception:
         return
+
+    def _apply(e: dict, ent: dict) -> None:
+        if ent.get("cc"):
+            e["coveredCalls"] = ent["cc"]
+        if ent.get("gamma"):
+            e["gamma"] = ent["gamma"]
+
     for e in account_data.get("equities", []):
         sym, spot = e.get("symbol"), e.get("price")
         if not sym or not spot or (e.get("qty") or 0) < CC_MIN_SHARES:
             continue
         ent = cache.get(sym) or {}
         fresh = ent.get("ts") is not None and (now_ts - ent["ts"]) < CC_TTL_SEC
-        if fresh or (not market_open and ent.get("cc")):
-            if ent.get("cc"):
-                e["coveredCalls"] = ent["cc"]
+        if fresh or (not market_open and (ent.get("cc") or ent.get("gamma"))):
+            _apply(e, ent)
             continue
         try:
             cc = rc.get_covered_calls(rh, sym, spot)
         except Exception:
             cc = None
-        if cc:
-            cache[sym] = {"ts": now_ts, "cc": cc}
-            e["coveredCalls"] = cc
-        elif ent.get("cc"):
-            e["coveredCalls"] = ent["cc"]  # bad pull — keep the last good ladder
+        try:
+            gam = rc.get_gamma_walls(rh, sym, spot)
+        except Exception:
+            gam = None
+        if cc or gam:
+            # Keep the previous value for whichever side failed this cycle.
+            ent = {"ts": now_ts, "cc": cc or ent.get("cc"), "gamma": gam or ent.get("gamma")}
+            cache[sym] = ent
+        _apply(e, ent)
 
 
 def _enrich_price_history(rh, account_data: dict, days: int = 7) -> None:
