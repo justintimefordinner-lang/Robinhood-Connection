@@ -3,6 +3,7 @@ import { Card, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { Donut } from "@/components/charts";
 import { HoldingsTable } from "@/components/HoldingsTable";
 import { HomeHero } from "@/components/HomeHero";
+import { TopMovers } from "@/components/TopMovers";
 import type { DonutSlice } from "@/components/charts";
 import { Amt, HideButton } from "@/components/privacy";
 import { AccountSwitcher } from "@/components/AccountSwitcher";
@@ -278,6 +279,9 @@ export default async function HomePage() {
               <span className="shrink-0 text-sm font-medium text-sky-300">Open ›</span>
             </Card>
           </Link>
+
+          {/* Top movers — day's change in net market value per ticker */}
+          <TopMovers equities={equities} options={options} />
         </div>
 
         {/* VIX regime + portfolio fit — one concept (the regime sets how your cash

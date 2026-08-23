@@ -31,6 +31,7 @@ export interface Equity {
   qty: number;
   avgCost: number; // average cost per share
   price: number; // latest close per share
+  dayChange?: number | null; // per-share $ move today (vs prior close), for Top Movers
 }
 
 export interface CryptoHolding {
@@ -70,6 +71,8 @@ export interface OptionPosition {
   iv: number; // implied volatility (decimal, e.g. 0.61)
   breakeven: number;
   underlyingPrice?: number; // current price of the underlying (for "to strike")
+  underlyingChange?: number | null; // underlying per-share $ move today (Top Movers)
+  dayValueChange?: number | null; // this leg's signed $ value move today (Top Movers)
   chanceOfProfitShort?: number; // 0..1, for short positions
   openedAt?: string; // ISO date the position was opened (held positions only)
   erDate?: string | null; // next earnings date (ISO) for the underlying, if known

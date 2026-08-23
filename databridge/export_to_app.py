@@ -115,18 +115,20 @@ def _dte(expiration: str | None) -> int | None:
     return (exp - date.today()).days
 
 
-def map_equity(p: dict[str, Any]) -> dict[str, Any]:
+def map_equity(p: dict[str, Any], stock_day: dict | None = None) -> dict[str, Any]:
     ticker = p.get("ticker", "")
+    sd = (stock_day or {}).get(ticker, {})
     return {
         "symbol": ticker,
         "name": ticker,
         "qty": p.get("quantity") or 0,
         "avgCost": _round(p.get("avg_price")),
         "price": _round(p.get("underlying_price")),
+        "dayChange": _round(sd.get("change")),  # per-share $ move today (Top Movers)
     }
 
 
-def map_option(p: dict[str, Any], underlying_price: float | None) -> dict[str, Any]:
+def map_option(p: dict[str, Any], underlying_price: float | None, stock_day: dict | None = None) -> dict[str, Any]:
     pc = (p.get("put_call") or "").upper()
     is_put = pc == "PUT"
     signed_qty = p.get("quantity") or 0
@@ -145,6 +147,17 @@ def map_option(p: dict[str, Any], underlying_price: float | None) -> dict[str, A
     created_at = p.get("created_at")
     opened_at = created_at[:10] if isinstance(created_at, str) and len(created_at) >= 10 else None
 
+    # Day's change in THIS leg's market value: the contract's per-share move since
+    # its prior close, times 100 x contracts, signed by side — a long gains when the
+    # option rises, a short gains when it falls. None when the feed omits either
+    # price, so Top Movers simply skips the leg instead of showing a bogus number.
+    sd = (stock_day or {}).get(p.get("ticker", ""), {})
+    prev_close = p.get("prev_close")
+    day_val = None
+    if mark is not None and prev_close is not None and qty:
+        side_sign = -1.0 if side == "short" else 1.0
+        day_val = side_sign * (mark - prev_close) * 100 * qty
+
     opt: dict[str, Any] = {
         "id": p.get("symbol", ""),
         "kind": _kind_for(p),
@@ -161,6 +174,8 @@ def map_option(p: dict[str, Any], underlying_price: float | None) -> dict[str, A
         "iv": _round(iv, 4) if iv is not None else 0.0,
         "breakeven": _round(breakeven),
         "underlyingPrice": _round(underlying_price),
+        "underlyingChange": _round(sd.get("change")),  # underlying per-share $ move today
+        "dayValueChange": _round(day_val),  # this leg's signed $ value move today
     }
     if opened_at:
         opt["openedAt"] = opened_at
@@ -175,16 +190,27 @@ def build_account_data(
     points: list[dict[str, Any]],
 ) -> dict[str, Any]:
     positions = snap.get("positions", [])
-    equities = [map_equity(p) for p in positions if (p.get("asset_type") or "").upper() == "EQUITY"]
-
+    eq_positions = [p for p in positions if (p.get("asset_type") or "").upper() == "EQUITY"]
     opt_positions = [p for p in positions if (p.get("asset_type") or "").upper() == "OPTION"]
+
+    # Day price + point-change for every held stock AND every option underlying, so
+    # the Top Movers tiles can aggregate the day's $ move per ticker.
+    day_syms = sorted({p.get("ticker") for p in (eq_positions + opt_positions) if p.get("ticker")})
+    try:
+        import robinhood_client as rc
+        stock_day = rc.get_stock_day(rh, day_syms) if day_syms else {}
+    except Exception:
+        stock_day = {}
+
+    equities = [map_equity(p, stock_day) for p in eq_positions]
+
     underlyings = sorted({p.get("ticker") for p in opt_positions if p.get("ticker")})
     try:
         import robinhood_client as rc
         quotes = rc.get_quotes(rh, underlyings) if underlyings else {}
     except Exception:
         quotes = {}
-    options = [map_option(p, quotes.get(p.get("ticker"))) for p in opt_positions]
+    options = [map_option(p, quotes.get(p.get("ticker")), stock_day) for p in opt_positions]
 
     crypto_raw = []
     try:

@@ -439,6 +439,9 @@ def _option_positions(rh, account_number: str | None = None) -> list[dict[str, A
             "theta": _to_float(market.get("theta")),
             "iv": _to_float(market.get("implied_volatility")),
             "mark": _to_float(market.get("mark_price") or market.get("adjusted_mark_price")),
+            # Prior session's close for this contract — the mark's day change is
+            # (mark - prev_close), which drives the Top Movers tiles.
+            "prev_close": _to_float(market.get("previous_close_price")),
             # Robinhood's own timestamp for this position record. Best-effort
             # "opened" date: for a straightforward single trade it's exactly
             # right, but if the position was later adjusted (e.g. partially
@@ -488,6 +491,39 @@ def get_quotes(rh, symbols: list[str]) -> dict[str, float | None]:
     except Exception:
         return {sym: None for sym in symbols}
     return {sym: _to_float(px) for sym, px in zip(symbols, prices)}
+
+
+def get_stock_day(rh, symbols: list[str]) -> dict[str, dict[str, float | None]]:
+    """Per-ticker current price + day point-change (vs the prior close) for every
+    held stock AND every option underlying. Powers the Top Movers tiles.
+
+    get_latest_price only returns a price, so this uses the fuller quote endpoint
+    which also carries previous_close. Returns {ticker: {price, change}}; empty on
+    failure so the export degrades to no movers rather than crashing.
+    """
+    wanted = sorted({s for s in symbols if s})
+    if not wanted:
+        return {}
+    try:
+        quotes = rh.stocks.get_quotes(wanted) or []
+    except Exception as exc:  # noqa: BLE001 — never let movers break the export
+        print(f"  note: stock day-quotes unavailable ({exc}).")
+        return {}
+    out: dict[str, dict[str, float | None]] = {}
+    for q in quotes:
+        if not q:
+            continue
+        sym = q.get("symbol")
+        if not sym:
+            continue
+        # Extended-hours print when the session is closed, else the regular last.
+        last = _to_float(q.get("last_extended_hours_trade_price")) or _to_float(q.get("last_trade_price"))
+        prev = _to_float(q.get("previous_close"))
+        out[sym] = {
+            "price": last,
+            "change": (last - prev) if (last is not None and prev) else None,
+        }
+    return out
 
 
 def _id_from_url(url: str | None) -> str | None:
