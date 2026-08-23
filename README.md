@@ -11,6 +11,11 @@ only through a folder of JSON files on disk:
 
 ---
 
+> **Setting this up for the first time?** Read
+> **[SETUP_GUIDE.md](SETUP_GUIDE.md)** — a step-by-step walkthrough for a Raspberry Pi
+> or your own computer. The quickest route is to hand that file to Claude Code and
+> let it drive the whole install.
+
 ## See the dashboard in 60 seconds (no Robinhood account needed)
 
 ```bash
