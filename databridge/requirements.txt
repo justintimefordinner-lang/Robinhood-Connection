@@ -1,5 +1,5 @@
 robin_stocks>=3.4
-python-dotenv>=1.0
+python-dotenv>=1.2.3
 pyotp>=2.9
 yfinance>=0.2
 # s5fi_breadth.py: S&P 500 constituent download + breadth math
