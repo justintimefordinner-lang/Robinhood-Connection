@@ -4,7 +4,6 @@ import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { PortfolioFit } from "@/components/PortfolioFit";
 import { PostureStats } from "@/components/PostureStats";
 import { VixIndicators } from "@/components/VixIndicators";
-import { MesTracker } from "@/components/MesTracker";
 import { getMesQuote } from "@/lib/mes-data";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
@@ -61,16 +60,17 @@ export default async function VixPage() {
             cash={data.summary.cash}
             totalValue={data.summary.totalValue}
             optionsBuyingPower={data.summary.optionsBuyingPower ?? 0}
+            mes={mes}
           />
         )}
 
-        {mes && <MesTracker mes={mes} />}
       </ShowAmounts>
     </main>
   );
 }
 
 function VixBody({
+  mes,
   vix,
   options,
   cash,
@@ -82,6 +82,7 @@ function VixBody({
   cash: number;
   totalValue: number;
   optionsBuyingPower: number;
+  mes?: Awaited<ReturnType<typeof getMesQuote>>;
 }) {
   const a = assessVix(vix);
   const tone = REGIME_COLORS[a.regime];
@@ -170,7 +171,7 @@ function VixBody({
       {/* Indicator panel */}
       <SectionTitle>Indicator panel</SectionTitle>
       <p className="-mt-1 mb-2 px-1 text-[11px] text-muted">Tap any row for what it means and where it sits.</p>
-      <VixIndicators a={a} />
+      <VixIndicators a={a} mes={mes} />
 
       {/* Cheat sheet */}
       <SectionTitle>Cheat sheet</SectionTitle>

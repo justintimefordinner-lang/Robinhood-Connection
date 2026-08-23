@@ -2,6 +2,8 @@
 
 import { Fragment, useState, type ReactNode } from "react";
 import { Card } from "@/components/ui";
+import { MesChart } from "@/components/MesTracker";
+import { fmtMes, type MesQuote } from "@/lib/mes-data";
 import type { VixAssessment, Regime } from "@/lib/vix";
 
 // ---------------------------------------------------------------------------
@@ -101,7 +103,7 @@ interface IndRow {
   reading?: ReactNode; // color-coded "right now" interpretation
 }
 
-function buildRows(a: VixAssessment): IndRow[] {
+function buildRows(a: VixAssessment, mes?: MesQuote | null): IndRow[] {
   const rows: IndRow[] = [];
   const vix = a.vix;
 
@@ -316,12 +318,37 @@ function buildRows(a: VixAssessment): IndRow[] {
       ) : undefined,
   });
 
+  // MES — direction of the S&P futures over the last five sessions. Sourced
+  // straight from Yahoo rather than the bridge, so it's optional here.
+  if (mes) {
+    const up = mes.slope >= 0;
+    const dirColor = up ? "text-emerald-300" : "text-rose-300";
+    rows.push({
+      key: "mes",
+      name: "S&P futures (MES)",
+      meaning: "5-session direction of the overnight tape",
+      available: true,
+      value: fmtMes(mes.last),
+      band: `${up ? "↑" : "↓"} ${up ? "rising" : "falling"}`,
+      valueColor: dirColor,
+      blurb:
+        "The S&P 500 futures trade nearly around the clock, so they carry the market's reaction to everything that happens while the cash session is shut — overnight news, foreign markets, the pre-open. The five-session slope is the short-run drift you're selling premium into: persistently rising favors put-side positioning, persistently falling argues for smaller size and further OTM strikes. Quoted from the E-mini (ES), which tracks the same index as the Micro (MES) at five times the contract size.",
+      scale: <MesChart mes={mes} />,
+      reading: (
+        <span className={dirColor}>
+          Now {fmtMes(mes.last)} — {up ? "drifting up" : "drifting down"} about{" "}
+          {Math.abs(mes.slope).toFixed(1)} pts/session.
+        </span>
+      ),
+    });
+  }
+
   return rows;
 }
 
-export function VixIndicators({ a }: { a: VixAssessment }) {
+export function VixIndicators({ a, mes }: { a: VixAssessment; mes?: MesQuote | null }) {
   const [open, setOpen] = useState<string | null>(null);
-  const rows = buildRows(a);
+  const rows = buildRows(a, mes);
 
   return (
     <Card className="divide-y divide-border">
