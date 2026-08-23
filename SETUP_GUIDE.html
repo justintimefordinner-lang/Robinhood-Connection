@@ -1,0 +1,437 @@
+<title>Robinhood Connection Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --paper:      #FBFBF9;
+    --surface:    #F1F3F0;
+    --ink:        #14201A;
+    --ink-soft:   #4A5A51;
+    --muted:      #6B7A72;
+    --rule:       #DCE2DD;
+    --accent:     #1E7A4B;
+    --accent-dim: #E3F0E8;
+    --amber:      #8A5A12;
+    --amber-dim:  #F6EEDF;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #101613;
+      --surface:    #18211C;
+      --ink:        #E8EDE9;
+      --ink-soft:   #B3C0B8;
+      --muted:      #8A9A91;
+      --rule:       #27332C;
+      --accent:     #5FBE8B;
+      --accent-dim: #172C21;
+      --amber:      #D9A45C;
+      --amber-dim:  #2B2317;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #101613;
+    --surface:    #18211C;
+    --ink:        #E8EDE9;
+    --ink-soft:   #B3C0B8;
+    --muted:      #8A9A91;
+    --rule:       #27332C;
+    --accent:     #5FBE8B;
+    --accent-dim: #172C21;
+    --amber:      #D9A45C;
+    --amber-dim:  #2B2317;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 4rem 1.5rem 6rem;
+  }
+
+  .wrap { max-width: 46rem; margin: 0 auto; }
+
+  /* ---- masthead ---------------------------------------------------- */
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 0.75rem;
+  }
+  h1 {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-weight: 400; font-size: clamp(2.6rem, 7vw, 3.6rem);
+    line-height: 1.05; letter-spacing: -0.01em;
+    margin: 0 0 0.6rem; text-wrap: balance;
+  }
+  .standfirst { font-size: 1.12rem; color: var(--ink-soft); margin: 0 0 1.1rem; max-width: 34rem; }
+  .repo {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.8rem; word-break: break-all;
+  }
+  .repo a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .repo a:hover, .repo a:focus-visible { border-bottom-color: var(--accent); }
+
+  /* ---- headings ---------------------------------------------------- */
+  h2 {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-weight: 400; font-size: 2rem; line-height: 1.15;
+    margin: 3.5rem 0 0.4rem; padding-top: 1.5rem;
+    border-top: 1px solid var(--rule); text-wrap: balance;
+  }
+  h2 .num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.75rem; color: var(--accent); letter-spacing: 0.1em;
+    display: block; margin-bottom: 0.35rem;
+  }
+  h3 {
+    font-size: 1.02rem; font-weight: 600; letter-spacing: -0.005em;
+    margin: 2.2rem 0 0.5rem;
+  }
+  h3 .step {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    color: var(--accent); font-weight: 600; margin-right: 0.5rem;
+  }
+  p { margin: 0 0 1rem; }
+  a { color: var(--accent); }
+
+  /* ---- lead / callouts --------------------------------------------- */
+  .lead {
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    padding: 1.5rem 1.6rem;
+    margin: 0 0 2rem;
+  }
+  .lead h2 { border: 0; margin: 0 0 0.6rem; padding: 0; font-size: 1.6rem; }
+  .lead ol { margin: 0.8rem 0 0.9rem; padding-left: 1.3rem; }
+  .lead li { margin-bottom: 0.4rem; }
+  .lead p:last-child { margin-bottom: 0; }
+
+  .note {
+    border-left: 3px solid var(--amber);
+    background: var(--amber-dim);
+    padding: 1rem 1.2rem; margin: 1.5rem 0;
+    font-size: 0.95rem;
+  }
+  .note strong { color: var(--amber); }
+  .note p:last-child { margin-bottom: 0; }
+
+  /* ---- code -------------------------------------------------------- */
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.82rem; line-height: 1.6;
+  }
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+    background: var(--surface);
+    padding: 0.1em 0.35em; border-radius: 2px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .comment { color: var(--muted); }
+
+  /* ---- tables ------------------------------------------------------ */
+  .tablewrap { overflow-x: auto; margin: 0 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem 0.6rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--ink);
+  }
+  td:first-child { padding-right: 1.2rem; }
+
+  /* ---- path cards -------------------------------------------------- */
+  .paths { display: grid; gap: 1rem; grid-template-columns: 1fr; margin: 1.4rem 0 0; }
+  @media (min-width: 34rem) { .paths { grid-template-columns: 1fr 1fr; } }
+  .path { border: 1px solid var(--rule); padding: 1.1rem 1.2rem; }
+  .path h4 {
+    margin: 0 0 0.3rem; font-size: 0.95rem; font-weight: 600;
+  }
+  .path .tag {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); display: block; margin-bottom: 0.45rem;
+  }
+  .path p { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+
+  ul, ol { padding-left: 1.3rem; margin: 0 0 1.1rem; }
+  li { margin-bottom: 0.35rem; }
+
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 3rem 0; }
+
+  .footer {
+    margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule);
+    font-size: 0.85rem; color: var(--muted);
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- print / save-as-PDF ------------------------------------------ */
+  @media print {
+    /* Running header + page numbers on every printed page. */
+    @page {
+      margin: 0.7in 0.75in 0.8in;
+      @top-left { content: "Hanks Made Investments LLC"; font-size: 8pt; color: #666; }
+      @top-right { content: "Robinhood Connection — Setup Guide"; font-size: 8pt; color: #666; }
+      @bottom-right { content: counter(page); font-size: 8pt; color: #666; }
+    }
+    :root {
+      --paper: #fff; --surface: #F4F5F3; --ink: #111; --ink-soft: #333;
+      --muted: #555; --rule: #CCC; --accent: #14603A;
+      --accent-dim: #EFF5F1; --amber: #6B4408; --amber-dim: #F8F3E9;
+    }
+    body { font-size: 10.5pt; padding: 0; line-height: 1.5; }
+    .wrap { max-width: none; }
+    h2 { page-break-after: avoid; break-after: avoid; font-size: 17pt; margin-top: 1.6rem; }
+    h3 { page-break-after: avoid; break-after: avoid; }
+    pre, table, .note, .lead, .path { page-break-inside: avoid; break-inside: avoid; }
+    pre { font-size: 8.4pt; white-space: pre-wrap; word-break: break-word; }
+    a { text-decoration: none; }
+    .pagebreak { page-break-before: always; break-before: page; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Hanks Made Investments LLC <span aria-hidden="true">·</span> Setup Guide</p>
+    <h1>Robinhood Connection</h1>
+    <p class="standfirst">A self-hosted options-wheel dashboard for your Robinhood account — on a Raspberry Pi, or on the computer you already own.</p>
+    <p class="repo"><a href="https://github.com/justintimefordinner-lang/Robinhood-Connection">github.com/justintimefordinner-lang/Robinhood-Connection</a></p>
+  </header>
+
+  <div class="lead">
+    <h2>Start here: let Claude do it</h2>
+    <p>You don't need to understand a single command in this guide.</p>
+    <ol>
+      <li>Install <strong>Claude Code</strong> from <code>claude.ai/code</code> on the computer you're setting this up from.</li>
+      <li>Start it, and <strong>give it this file.</strong></li>
+      <li>Say: <em>“Set up the Robinhood Connection dashboard for me using this guide.”</em></li>
+      <li>Answer the questions it asks, and paste back anything it wants to see.</li>
+    </ol>
+    <p>Claude clones the repository, installs what's missing, writes your configuration, walks you through the Robinhood login, and starts everything running. The rest of this guide is written so Claude can follow it exactly — and so you can do it by hand if you'd rather.</p>
+  </div>
+
+  <div class="note">
+    <p><strong>One rule, either way.</strong> Never paste your Robinhood password into a chat window, a screenshot, or a public issue. It belongs in one place: the <code>.env</code> file on your own machine. Claude will tell you where to type it — it never needs to see it.</p>
+  </div>
+
+  <h2><span class="num">01</span>What you're setting up</h2>
+  <p>Two halves that only ever talk through a folder of files on disk:</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Piece</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>appfiles/</code><br><span style="color:var(--muted);font-size:0.88em">Next.js dashboard</span></td><td>Everything you look at — Portfolio, Stocks, Options, P&amp;L, Volatility, Morning Brief, Research.</td></tr>
+        <tr><td><code>databridge/</code><br><span style="color:var(--muted);font-size:0.88em">Python program</span></td><td>Reads your Robinhood account and public market data, then writes the files the dashboard renders.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>The bridge is read-only. It cannot place, change, or cancel a trade.</strong> There is no order path anywhere in the code — it only reads positions and market data.</p>
+
+  <h3>Choose where it runs</h3>
+  <div class="paths">
+    <div class="path">
+      <span class="tag">Path A</span>
+      <h4>Raspberry Pi</h4>
+      <p>Runs around the clock, so the Morning Brief and live data are always current and you can open it from your phone. The recommended home.</p>
+    </div>
+    <div class="path">
+      <span class="tag">Path B</span>
+      <h4>Your own computer</h4>
+      <p>Nothing extra to buy. Data refreshes only while your machine is awake and the program is running.</p>
+    </div>
+  </div>
+  <p style="margin-top:1rem">Start on a computer and move to a Pi later if you like — the setup is the same either way.</p>
+
+  <h2><span class="num">02</span>Before you start</h2>
+  <ul>
+    <li>A <strong>Robinhood account</strong> with <strong>authenticator-app</strong> two-factor turned on (Account → Security). Text-message two-factor won't work for unattended running.</li>
+    <li><strong>Node.js 20.9+</strong> — the dashboard needs it.</li>
+    <li><strong>Python 3.10+</strong> — the bridge needs it.</li>
+    <li><strong>Git.</strong></li>
+  </ul>
+  <p>To see what you already have:</p>
+<pre><code>node -v
+python3 --version
+git --version</code></pre>
+
+  <h2><span class="num">03</span>Try it first — no account needed</h2>
+  <p>Before wiring up anything real, look at the whole dashboard filled with a built-in demo portfolio:</p>
+<pre><code>git clone https://github.com/justintimefordinner-lang/Robinhood-Connection.git
+cd Robinhood-Connection/appfiles
+npm install
+npm run dev</code></pre>
+  <p>Open <code>http://localhost:3001</code> and click <strong>Example</strong> in the header. Every screen fills with synthetic data. Nothing touches Robinhood and no credentials are involved. Press <code>Ctrl+C</code> to stop.</p>
+
+  <h2 class="pagebreak"><span class="num">Path A</span>Raspberry Pi — always on</h2>
+  <p>Tested on a Raspberry Pi 4 or 5 running 64-bit Raspberry Pi OS.</p>
+
+  <h3><span class="step">A1</span>Prepare the system</h3>
+<pre><code>sudo apt update &amp;&amp; sudo apt full-upgrade -y
+sudo apt install -y git python3-venv python3-pip build-essential</code></pre>
+  <p>Install Node 20 from NodeSource — the version in Raspberry Pi OS's own repository is usually too old:</p>
+<pre><code>curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v      <span class="comment"># expect v20.x</span></code></pre>
+  <p>Install PM2, which keeps everything running and brings it back after a reboot:</p>
+<pre><code>sudo npm install -g pm2</code></pre>
+  <p><strong>If your Pi has 4&nbsp;GB of RAM or less</strong>, give it more swap so the dashboard build doesn't run out of memory partway through:</p>
+<pre><code>sudo dphys-swapfile swapoff
+sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
+sudo dphys-swapfile setup
+sudo dphys-swapfile swapon</code></pre>
+
+  <h3><span class="step">A2</span>Get the code</h3>
+<pre><code>cd ~
+git clone https://github.com/justintimefordinner-lang/Robinhood-Connection.git
+cd Robinhood-Connection</code></pre>
+
+  <h3><span class="step">A3</span>Build the dashboard</h3>
+<pre><code>cd ~/Robinhood-Connection/appfiles
+npm install
+npm run build          <span class="comment"># several minutes on a Pi — that's normal</span></code></pre>
+
+  <h3><span class="step">A4</span>Set up the bridge</h3>
+<pre><code>cd ~/Robinhood-Connection/databridge
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+nano .env</code></pre>
+  <p>Fill in these four values, then save with <code>Ctrl+O</code>, <code>Enter</code>, <code>Ctrl+X</code>:</p>
+<pre><code>ROBINHOOD_USERNAME=your_email@example.com
+ROBINHOOD_PASSWORD=your_password
+ROBINHOOD_TOTP_SECRET=          <span class="comment"># see section 05 — needed for 24/7</span>
+APP_DATA_DIR=/home/YOUR_USERNAME/Robinhood-Connection/appfiles/data</code></pre>
+  <p>Replace <code>YOUR_USERNAME</code> with whatever <code>whoami</code> prints.</p>
+
+  <h3><span class="step">A5</span>First login</h3>
+<pre><code>cd ~/Robinhood-Connection/databridge
+.venv/bin/python export_to_app.py</code></pre>
+  <p>If you left <code>ROBINHOOD_TOTP_SECRET</code> blank it asks for the six-digit code from your authenticator app. When it finishes you should see:</p>
+<pre><code>Wrote /home/.../appfiles/data/snapshot.json  (1 account(s), N positions).</code></pre>
+  <p>That file is your dashboard's data. If it appears, the hard part is behind you.</p>
+
+  <h3><span class="step">A6</span>Start everything</h3>
+  <p>Open the process definitions and correct the paths to match your username:</p>
+<pre><code>cd ~/Robinhood-Connection
+nano ecosystem.config.js     <span class="comment"># update every "cwd" and "script" path</span></code></pre>
+<pre><code>pm2 start ecosystem.config.js
+pm2 save
+pm2 startup                  <span class="comment"># then run the command it prints back</span>
+pm2 list</code></pre>
+
+  <h3><span class="step">A7</span>Open it</h3>
+  <p>From any device on the same network, visit <code>http://&lt;your-pi-ip&gt;:3001</code>. Find the address with <code>hostname -I</code>.</p>
+
+  <h2 class="pagebreak"><span class="num">Path B</span>Your own computer</h2>
+  <p>Works on macOS, Linux, and Windows — use PowerShell, or WSL if you prefer Linux commands.</p>
+
+  <h3><span class="step">B1</span>Get the code</h3>
+<pre><code>git clone https://github.com/justintimefordinner-lang/Robinhood-Connection.git
+cd Robinhood-Connection</code></pre>
+
+  <h3><span class="step">B2</span>Set up the bridge</h3>
+<pre><code>cd databridge
+python3 -m venv .venv
+source .venv/bin/activate          <span class="comment"># Windows: .venv\Scripts\Activate.ps1</span>
+pip install -r requirements.txt
+cp .env.example .env               <span class="comment"># Windows: copy .env.example .env</span></code></pre>
+  <p>Open <code>.env</code> in any text editor and fill in your username, password, and:</p>
+<pre><code>APP_DATA_DIR=/full/path/to/Robinhood-Connection/appfiles/data</code></pre>
+  <p>That must be the <strong>full, absolute</strong> path — on Windows it looks like <code>C:\Users\you\Robinhood-Connection\appfiles\data</code>.</p>
+
+  <h3><span class="step">B3</span>First login</h3>
+<pre><code>python export_to_app.py</code></pre>
+  <p>Enter your six-digit code when asked, and look for the <code>Wrote … snapshot.json</code> line.</p>
+
+  <h3><span class="step">B4</span>Start the dashboard</h3>
+  <p>In a <strong>second</strong> terminal:</p>
+<pre><code>cd Robinhood-Connection/appfiles
+npm install
+npm run dev</code></pre>
+  <p>Open <code>http://localhost:3001</code>.</p>
+
+  <h3><span class="step">B5</span>Keep the data fresh</h3>
+  <p>Back in the first terminal, leave this running whenever you want live data:</p>
+<pre><code>cd Robinhood-Connection/databridge
+python auto_push.py</code></pre>
+  <p>It refreshes positions about once a minute and rebuilds the Morning Brief and research screens on their own slower schedules. Closing the terminal stops the updates — the dashboard keeps showing the last data it received. Once a day, for closed-trade history and the P&amp;L page:</p>
+<pre><code>python sync_trade_history.py</code></pre>
+
+  <h2><span class="num">05</span>Two-factor: the TOTP secret</h2>
+  <p>A Pi that runs unattended needs to generate its own login codes — otherwise it stops the first time the session expires and nobody is there to type one.</p>
+  <ol>
+    <li>In Robinhood: <strong>Account → Security → Two-Factor Authentication → Authenticator App</strong>.</li>
+    <li>When the QR code appears, choose <strong>“Can't scan it?”</strong> or <strong>“Enter code manually.”</strong></li>
+    <li>Copy the long string of letters and numbers. That's the <em>secret key</em> — not the six-digit code that changes every thirty seconds.</li>
+    <li>Put it in <code>.env</code> as <code>ROBINHOOD_TOTP_SECRET=…</code></li>
+  </ol>
+  <p>Running on your own computer and happy to type a code now and then? Leave it blank.</p>
+
+  <h2><span class="num">06</span>Checking that it worked</h2>
+  <p><strong>The bridge is pulling data.</strong> This prints a recent timestamp and your tickers:</p>
+<pre><code>python3 -c "
+import json
+d = json.load(open('appfiles/data/snapshot.json'))
+print('generated:', d['meta']['generatedAt'])
+for acct, v in d['data'].items():
+    print('stocks :', [e['symbol'] for e in v['equities']])
+    print('options:', sorted({o['symbol'] for o in v['options']}))
+"</code></pre>
+  <p><strong>The dashboard is live.</strong> Open it and check the Portfolio page shows your real total rather than the demo numbers. The <strong>Example</strong> button in the header switches between your data and the built-in demo at any time.</p>
+
+  <h2><span class="num">07</span>Day to day</h2>
+  <p>Getting updates:</p>
+<pre><code>cd ~/Robinhood-Connection
+git pull
+cd appfiles &amp;&amp; npm run build   <span class="comment"># only if the dashboard changed</span>
+pm2 restart all                <span class="comment"># on a laptop, restart the two commands</span></code></pre>
+  <div class="note">
+    <p><strong>Two things trip everyone up once.</strong> Changed the bridge? <em>Restart it</em> — a running Python process keeps the old code in memory, so pulling alone changes nothing. Changed the dashboard? <em>Rebuild it</em> — Next.js compiles ahead of time, so new screens won't appear until <code>npm run build</code> runs.</p>
+  </div>
+
+  <h2><span class="num">08</span>When something's wrong</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td>Dashboard shows demo data</td><td>The <strong>Example</strong> toggle is on, or no snapshot exists yet — click it in the header, and check <code>appfiles/data/snapshot.json</code> is there.</td></tr>
+        <tr><td>Data stuck at an old time</td><td>The bridge stopped or its login expired. Check <code>pm2 logs databridge</code>, and log in again if it asks.</td></tr>
+        <tr><td>Login or MFA errors</td><td>Recheck <code>.env</code>. Robinhood must be on an authenticator app, not text messages — then set <code>ROBINHOOD_TOTP_SECRET</code>.</td></tr>
+        <tr><td><code>APP_DATA_DIR does not exist</code></td><td>The path in <code>.env</code> is wrong. Use the full absolute path to <code>appfiles/data</code>.</td></tr>
+        <tr><td>Build killed on a Pi</td><td>Out of memory — add swap (step A1) and build again.</td></tr>
+        <tr><td>Morning Brief is empty</td><td>Normal on a weekend. It only rebuilds on trading days and keeps the last board until then.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Stuck on something not listed? Hand Claude this guide plus whatever the terminal printed, and it will work out what happened.</p>
+
+  <h2><span class="num">09</span>Keeping your account safe</h2>
+  <ul>
+    <li>Your credentials live <strong>only</strong> in <code>databridge/.env</code> on your own machine. That file is git-ignored and never leaves the computer.</li>
+    <li><code>appfiles/data/</code> holds your real positions and is git-ignored too. Only the synthetic Example dataset ships in the repository.</li>
+    <li><strong>The bridge cannot trade.</strong> It reads positions and market data; there's no order path in the code at all.</li>
+    <li>Forking this publicly? Run <code>git status</code> before your first push and confirm neither <code>.env</code> nor anything under <code>appfiles/data/</code> is listed.</li>
+  </ul>
+
+  <p class="footer"><strong>Hanks Made Investments LLC</strong> · Not financial advice. A personal tool, provided as-is — see LICENSE.md in the repository.</p>
+
+</div>
