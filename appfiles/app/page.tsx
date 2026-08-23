@@ -149,28 +149,42 @@ export default async function HomePage() {
         }
         right={
           <div className="flex flex-col items-center gap-2">
-            {/* Market stat stack. BTC spot today; the S5FI breadth line goes
-                directly beneath it once the bridge supplies that number. Skipped
-                entirely when unavailable, so the icon row doesn't inherit the gap. */}
-            {btc && (
+            {/* Market stat stack — BTC spot sits directly above S5FI breadth.
+                Skipped entirely when neither number is available, so the icon row
+                doesn't inherit the stack's gap. */}
+            {(btc || vix?.s5fi != null) && (
               <div className="flex flex-col items-center gap-1">
-                <span
-                  className="tabular text-[11px] leading-none text-muted"
-                  title={`Bitcoin ${fmtBtc(btc.price)}${
-                    btc.changePct != null
-                      ? ` · ${btc.changePct >= 0 ? "+" : "−"}${(Math.abs(btc.changePct) * 100).toFixed(2)}% today`
-                      : ""
-                  } · ${btc.source}`}
-                >
-                  BTC:{" "}
+                {btc && (
                   <span
-                    className={`font-semibold ${
-                      btc.changePct == null ? "text-text" : btc.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
-                    }`}
+                    className="tabular text-[11px] leading-none text-muted"
+                    title={`Bitcoin ${fmtBtc(btc.price)}${
+                      btc.changePct != null
+                        ? ` · ${btc.changePct >= 0 ? "+" : "−"}${(Math.abs(btc.changePct) * 100).toFixed(2)}% today`
+                        : ""
+                    } · ${btc.source}`}
                   >
-                    {fmtBtc(btc.price)}
+                    BTC:{" "}
+                    <span
+                      className={`font-semibold ${
+                        btc.changePct == null ? "text-text" : btc.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {fmtBtc(btc.price)}
+                    </span>
                   </span>
-                </span>
+                )}
+                {vix?.s5fi != null && (
+                  <span className="tabular text-[11px] leading-none text-muted">
+                    S5FI:{" "}
+                    <span
+                      className={`font-semibold ${
+                        vix.s5fi >= 80 ? "text-red-400" : vix.s5fi >= 75 ? "text-orange-400" : "text-text"
+                      }`}
+                    >
+                      {vix.s5fi.toFixed(1)}
+                    </span>
+                  </span>
+                )}
               </div>
             )}
             <div className="flex items-center gap-2">

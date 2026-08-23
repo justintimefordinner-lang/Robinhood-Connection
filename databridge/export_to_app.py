@@ -470,6 +470,21 @@ def main() -> None:
         if vix_level is not None:
             spy_closes = md.get_daily_closes("SPY", days=60)
             rv20 = _realized_vol_pct(spy_closes, 20) if spy_closes else None
+
+            # S5FI — share of S&P 500 names above their own 50-day SMA. No feed
+            # serves StockCharts' $SPXA50R, so this is computed from constituent
+            # closes and cached for ~12h (a 500-ticker download is heavy).
+            s5fi = s5fi_slope_wk = s5fi_weekly = None
+            try:
+                import s5fi_breadth
+                br = s5fi_breadth.get_s5fi(data_dir)
+                if br:
+                    s5fi = br.get("level")
+                    s5fi_slope_wk = br.get("slopeWk")
+                    s5fi_weekly = br.get("weekly")
+            except Exception as exc:  # noqa: BLE001 — breadth is optional
+                print(f"  note: S5FI breadth unavailable ({exc}).")
+
             vix_payload = {
                 "asof": prices_as_of,
                 "source": SOURCE_LABEL,
@@ -478,6 +493,7 @@ def main() -> None:
                     "vix9d": fam.get("vix9d"), "vix3m": fam.get("vix3m"),
                     "vvix": fam.get("vvix"), "skew": fam.get("skew"),
                     "realizedVol20": rv20, "realizedVol30": None,
+                    "s5fi": s5fi, "s5fiSlopeWk": s5fi_slope_wk, "s5fiWeekly": s5fi_weekly,
                 },
             }
             with open(os.path.join(data_dir, VIX_FILE), "w", encoding="utf-8") as f:

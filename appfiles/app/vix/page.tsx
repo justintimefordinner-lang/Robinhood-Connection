@@ -4,6 +4,8 @@ import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { PortfolioFit } from "@/components/PortfolioFit";
 import { PostureStats } from "@/components/PostureStats";
 import { VixIndicators } from "@/components/VixIndicators";
+import { MesTracker } from "@/components/MesTracker";
+import { getMesQuote } from "@/lib/mes-data";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
 import { Freshness } from "@/components/RefreshButton";
@@ -29,6 +31,9 @@ export default async function VixPage() {
   const { id, data } = await getSelectedAccount(snap);
   const vix = getVixSnapshot();
   const vixUpdatedAt = getVixUpdatedAt();
+  // Independent of the bridge (straight from Yahoo), so it renders even when
+  // there's no VIX snapshot; null on any failure just drops the section.
+  const mes = await getMesQuote();
 
   return (
     <main className="px-4">
@@ -58,6 +63,8 @@ export default async function VixPage() {
             optionsBuyingPower={data.summary.optionsBuyingPower ?? 0}
           />
         )}
+
+        {mes && <MesTracker mes={mes} />}
       </ShowAmounts>
     </main>
   );

@@ -7,6 +7,9 @@ export type Regime = "extreme-greed" | "greed" | "slight-fear" | "fear" | "very-
 export type TermStructure = "deep_contango" | "contango" | "backwardation" | "deep_backwardation";
 export type Edge = "thin" | "ok" | "fat";
 
+export type S5fiZone = "oversold" | "rebuilding" | "noTrend" | "constructive" | "overbought";
+export type S5fiTrend = "strength" | "sideways" | "weakness";
+
 export interface VixInputs {
   vix: number;
   vix9d: number | null;
@@ -16,6 +19,28 @@ export interface VixInputs {
   realizedVol20: number | null;
   realizedVol30: number | null;
   realizedVolBasis?: string;
+  s5fi?: number | null; // $SPXA50R — % of S&P 500 above their 50-day SMA
+  s5fiSlopeWk?: number | null; // weekly-close least-squares slope (pts/week)
+  s5fiWeekly?: number[] | null; // recent weekly closes, oldest→newest (for the sparkline)
+}
+
+// Under 20 is oversold (a buying zone), over 80 overbought (shore up cash), and the
+// 37–58 middle is a no-trend chop zone. 20–37 and 58–80 are the transitions.
+export function classifyS5fi(v: number): S5fiZone {
+  if (v < 20) return "oversold";
+  if (v < 37) return "rebuilding";
+  if (v <= 58) return "noTrend";
+  if (v <= 80) return "constructive";
+  return "overbought";
+}
+
+// Weekly trend read off the slope of the weekly-close line (pts/week): a steep up
+// slope is market strength, flat is sideways, a steep down slope is weakness.
+const S5FI_TREND_STEEP = 2;
+export function classifyS5fiTrend(slopeWk: number): S5fiTrend {
+  if (slopeWk >= S5FI_TREND_STEEP) return "strength";
+  if (slopeWk <= -S5FI_TREND_STEEP) return "weakness";
+  return "sideways";
 }
 
 export interface VixSnapshot {
@@ -37,6 +62,11 @@ export interface VixAssessment {
   vix9d: number | null;
   vvix: number | null;
   skew: number | null;
+  s5fi: number | null;
+  s5fiZone: S5fiZone | null;
+  s5fiTrend: S5fiTrend | null;
+  s5fiSlopeWk: number | null;
+  s5fiWeekly: number[] | null;
   baseReservePct: number;
   targetReservePct: number; // cash target (band midpoint), share of total account
   targetDeployedPct: number; // 1 - reserve
@@ -126,6 +156,13 @@ export function assessVix(snap: VixSnapshot): VixAssessment {
   const vix = i.vix;
   const band = bandFor(vix);
 
+  // Breadth: level, its zone, and the weekly-slope trend. All null-safe — the
+  // bridge only supplies these once the constituent sweep has run.
+  const s5fi = i.s5fi ?? null;
+  const s5fiZone = s5fi != null ? classifyS5fi(s5fi) : null;
+  const s5fiSlopeWk = i.s5fiSlopeWk ?? null;
+  const s5fiTrend = s5fiSlopeWk != null ? classifyS5fiTrend(s5fiSlopeWk) : null;
+
   const cashLow = band.cashLow;
   const cashHigh = band.cashHigh;
   const targetReservePct = round((cashLow + cashHigh) / 2, 4);
@@ -154,6 +191,11 @@ export function assessVix(snap: VixSnapshot): VixAssessment {
     vix9d: i.vix9d ?? null,
     vvix: i.vvix,
     skew: i.skew,
+    s5fi,
+    s5fiZone,
+    s5fiTrend,
+    s5fiSlopeWk,
+    s5fiWeekly: i.s5fiWeekly ?? null,
     baseReservePct: targetReservePct,
     targetReservePct,
     targetDeployedPct,
