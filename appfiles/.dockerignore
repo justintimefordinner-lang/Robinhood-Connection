@@ -1,0 +1,31 @@
+# Commit as: Trading_Dashboard_App/.dockerignore
+#
+# Keeps the build context small and — more importantly — keeps live portfolio
+# data and any stray secret out of the image layers.
+
+.git
+.githooks
+.claude
+node_modules
+.next
+out
+
+# Live portfolio snapshots. Bind-mounted at runtime; never baked in.
+data
+
+# Never let a secret reach a layer, even by accident.
+.env
+.env.*
+credentials.env
+token.json
+*.pem
+
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# Docs and CI don't affect the build.
+README.md
+SECURITY.md
+LICENSE.md

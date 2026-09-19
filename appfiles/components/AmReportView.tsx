@@ -3,11 +3,13 @@
 // Briefing tab — renders data/am_report.json: the regime gate up top, the ranked
 // CSP board (tap a row for the full read), the VRP heat map by group, and a
 // collapsible steer-clear list of names that failed the gates.
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
+import { usePersistentState } from "@/lib/view-state";
 import { Card } from "@/components/ui";
 import { DataRefresh } from "@/components/DataRefresh";
 import { TIER_STYLE, VRP_STYLE } from "@/lib/am-report-types";
 import type { AmReport, AmBoardRow, AmVrpGroup, AmMover } from "@/lib/am-report-types";
+import { classifyS5fi, classifyS5fiTrend, type S5fiZone, type S5fiTrend } from "@/lib/vix";
 
 function pctClass(v: number): string {
   return v >= 0 ? "text-emerald-400" : "text-rose-400";
@@ -21,31 +23,78 @@ function annClass(v: number | null | undefined): string {
   if (v >= 20) return "text-emerald-400";
   return "text-muted";
 }
-function bbSigmaClass(v: number | null | undefined): string {
-  // More negative = further below the 20-day range = deeper OTM = more
-  // cushion for a put seller; near/above 0 means the strike sits inside or
-  // above the recent trading range.
-  if (v == null) return "text-muted";
-  if (v <= -1) return "text-emerald-300";
-  if (v <= 0) return "text-amber-300";
+// BB position color: for a short put, deeper below the 20-day mean (more negative σ)
+// is a safer, more mean-reversion-friendly strike; near the mean is close to money.
+function bbClass(sigma: number | null | undefined): string {
+  if (sigma == null) return "text-muted";
+  if (sigma <= -2) return "text-emerald-300"; // at / below the lower band
+  if (sigma <= -1) return "text-sky-300";
+  if (sigma < 0.5) return "text-amber-300"; // near the mean / money
   return "text-rose-300";
 }
 function timeOnly(iso: string): string {
   try {
-    return new Date(iso).toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZoneName: "short",
-    });
+    return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });
   } catch {
     return "";
   }
 }
 
+const S5_BRIEF_COLOR: Record<S5fiZone, string> = {
+  oversold: "text-emerald-300",
+  rebuilding: "text-sky-300",
+  noTrend: "text-amber-300",
+  constructive: "text-sky-300",
+  overbought: "text-rose-300",
+};
+const S5_BRIEF_LABEL: Record<S5fiZone, string> = {
+  oversold: "oversold",
+  rebuilding: "rebuilding",
+  noTrend: "no trend",
+  constructive: "constructive",
+  overbought: "overbought",
+};
+const S5_BRIEF_ARROW: Record<S5fiTrend, string> = { strength: "↑", sideways: "→", weakness: "↓" };
+
+// Shared column template for the CSP board so the header and every row line up.
+// Fractional units (not fixed widths) so the row always fits its container — no
+// horizontal scroll on a phone, and no numbers spilling past the card border.
+const BOARD_COLS = "grid-cols-[1.6rem_1fr_0.85fr_0.5fr_0.7fr_0.8fr_0.75fr_0.8fr]";
+
+// Slim 0–100 breadth bar (5 zones, white marker) for the regime card — a compact
+// echo of the VIX-tab S5FI scale. Segment widths match the 20/37/58/80 cuts.
+function BreadthBar({ value }: { value: number }) {
+  const zones = [
+    { w: 20, color: "bg-emerald-500/55" },
+    { w: 17, color: "bg-emerald-500/30" },
+    { w: 21, color: "bg-amber-500/50" },
+    { w: 22, color: "bg-orange-500/50" },
+    { w: 20, color: "bg-rose-500/55" },
+  ];
+  const pos = Math.max(0, Math.min(100, value));
+  return (
+    <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full">
+      <div className="flex h-full w-full">
+        {zones.map((z, i) => (
+          <div key={i} className={z.color} style={{ width: `${z.w}%` }} />
+        ))}
+      </div>
+      <div
+        className="absolute top-1/2 h-2.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40"
+        style={{ left: `${pos}%` }}
+      />
+    </div>
+  );
+}
+
 function RegimeBanner({ r }: { r: AmReport["regime"] }) {
   const deploy = r.volWeather === "deploy";
   const backward = r.termStructure === "backwardation";
+  const s5 = r.s5fi ?? null;
+  const s5zone = s5 != null ? classifyS5fi(s5) : null;
+  const s5slope = r.s5fiSlopeWk ?? null;
+  const s5trend = s5slope != null ? classifyS5fiTrend(s5slope) : null;
+  const s5trendColor = s5trend === "strength" ? "text-emerald-300" : s5trend === "weakness" ? "text-rose-300" : "text-muted";
   return (
     <Card className="px-4 py-3">
       <div className="flex items-center gap-3">
@@ -82,6 +131,21 @@ function RegimeBanner({ r }: { r: AmReport["regime"] }) {
           </span>
         ))}
       </div>
+      {s5 != null && s5zone && (
+        <div className="mt-2">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+            <span>Breadth (S5FI)</span>
+            <span className={`tabular font-semibold ${S5_BRIEF_COLOR[s5zone]}`}>{s5.toFixed(0)}</span>
+            <span className={S5_BRIEF_COLOR[s5zone]}>· {S5_BRIEF_LABEL[s5zone]}</span>
+            {s5trend && (
+              <span className={s5trendColor}>
+                {S5_BRIEF_ARROW[s5trend]} {s5trend === "strength" ? "strength" : s5trend === "weakness" ? "weakness" : "sideways"}
+              </span>
+            )}
+          </div>
+          <BreadthBar value={s5} />
+        </div>
+      )}
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
         {backward
           ? "Vol stressed — smaller size, sell further OTM."
@@ -93,36 +157,14 @@ function RegimeBanner({ r }: { r: AmReport["regime"] }) {
   );
 }
 
-// Shared column header for BoardRow, used both on the CSP board and inside
-// each expanded heat-map group (whose members render as BoardRows too).
-// Shared column template for the CSP board so the header and every row line up.
-// Fractional units (not fixed widths) so the row always fits its container — no
-// horizontal scroll on a phone, and no numbers spilling past the card border.
-const BOARD_COLS = "grid-cols-[1.6rem_1fr_0.85fr_0.5fr_0.7fr_0.8fr_0.75fr_0.8fr]";
-
-function BoardHeaderRow() {
-  return (
-    <div className={`grid ${BOARD_COLS} items-center gap-1.5 px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted`}>
-      <span className="text-center">Tier</span>
-      <span>Tkr</span>
-      <span>Price</span>
-      <span>Scr</span>
-      <span>VRP</span>
-      <span className="text-right">30D%</span>
-      <span className="text-right">Ann%</span>
-      <span className="text-right">P-Wall</span>
-    </div>
-  );
-}
-
 function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistentState(`amboard:${row.sym}`, false);
   const g = row.gamma;
   const c = row.chain;
   return (
     <div className={`px-3 py-2.5 ${highlight ? "bg-emerald-500/10" : ""}`}>
       <button onClick={() => setOpen((o) => !o)} className={`grid ${BOARD_COLS} w-full items-center gap-1.5 text-left`}>
-        <span className={`tabular rounded px-0.5 py-0.5 text-center text-[9px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
+        <span className={`tabular rounded px-1 py-0.5 text-center text-[11px] font-bold ring-1 ring-inset ${TIER_STYLE[row.tier]}`}>
           {row.tier}
         </span>
         {/* Earnings has no column of its own: a put that spans the report gets a small
@@ -151,39 +193,37 @@ function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boo
           {row.ladder.length > 0 && (
             <div className="mb-2">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted/80">
-                Put ladder{row.ladder[0] ? ` · ${row.ladder[0].exp} · ${row.ladder[0].dte}d` : ""}
+                Put ladder{c ? ` · ${c.exp} · ${c.dte}d` : ""}
               </div>
-              <div className="grid grid-cols-[2.2rem_1fr_1fr_1fr_1fr_1fr_1.3fr] gap-x-2 text-[11px]">
+              <div className="grid grid-cols-[1.7rem_0.95fr_0.85fr_0.9fr_0.9fr_0.9fr_0.9fr] gap-x-1.5 text-[11px]">
                 <span className="text-[9px] uppercase text-muted/70">Δ</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Strike</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">BBσ</span>
-                <span className="text-right text-[9px] uppercase text-muted/70">Buffer%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Prem%</span>
+                <span className="text-right text-[9px] uppercase text-muted/70">To Strk</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">Ann%</span>
                 <span className="text-right text-[9px] uppercase text-muted/70">OI</span>
-                {row.ladder.map((L) => (
+                {[...row.ladder].sort((a, b) => a.delta - b.delta).map((L) => (
                   <Fragment key={L.dTarget}>
-                    <span className="font-medium text-text">{L.dTarget}Δ</span>
+                    <span className="font-medium text-text">{Math.round(Math.abs(L.delta) * 100)}Δ</span>
                     <span className="tabular text-right text-text">${L.strike}</span>
-                    <span className={`tabular text-right ${bbSigmaClass(L.bbSigma)}`}>
-                      {L.bbSigma != null ? `${L.bbSigma >= 0 ? "+" : ""}${L.bbSigma.toFixed(1)}` : "—"}
-                    </span>
-                    <span className="tabular text-right text-muted">
-                      {row.last ? `${(((row.last - L.strike) / row.last) * 100).toFixed(1)}%` : "—"}
+                    <span className={`tabular text-right ${bbClass(L.bbSigma)}`}>
+                      {L.bbSigma != null ? `${L.bbSigma > 0 ? "+" : ""}${L.bbSigma.toFixed(1)}` : "—"}
                     </span>
                     <span className="tabular text-right text-text">{L.premPct.toFixed(2)}</span>
+                    <span className="tabular text-right text-muted">{row.last ? `${((row.last - L.strike) / row.last * 100).toFixed(1)}%` : "—"}</span>
                     <span className={`tabular text-right ${annClass(L.annPct)}`}>{L.annPct != null ? L.annPct.toFixed(1) : "—"}</span>
                     <span className="tabular text-right text-muted">{L.oi.toLocaleString()}</span>
                   </Fragment>
                 ))}
               </div>
-              <p className="mt-1 text-[9px] leading-relaxed text-muted/60">
-                BBσ = strike&apos;s std-devs from the 20-day mean · −2 = lower Bollinger band (deeper = further OTM)
-              </p>
+              <div className="mt-1 text-[9px] leading-snug text-muted/60">
+                BBσ = strike’s std-devs from the 20-day mean · −2 = lower Bollinger band (deeper = further OTM)
+              </div>
             </div>
           )}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border/60 pt-2 text-[11px] text-muted">
-            <span>Trend strength</span><span className="text-right text-text">{Math.round(row.trend.strength)} · +{row.trend.pctAbove200.toFixed(1)}% vs 200DMA</span>
+            <span>Trend strength</span><span className="text-right text-text">{Math.round(row.trend.strength)} · {row.trend.pctAbove200 >= 0 ? "+" : ""}{row.trend.pctAbove200.toFixed(1)}% vs 200DMA</span>
             <span>18-mo return</span><span className={`text-right ${pctClass(row.trend.ret18mo)}`}>{signed(row.trend.ret18mo)}</span>
             <span>IV / RV</span><span className="text-right text-text">{row.iv != null ? `${Math.round(row.iv * 100)} / ${Math.round((row.rv ?? 0) * 100)}` : "—"}{row.vrpRatio ? ` (×${row.vrpRatio})` : ""}</span>
             <span>IV Rank</span><span className="text-right text-text">{row.ivr != null ? `${Math.round(row.ivr)} (vs 1y)` : `building${row.ivrSamples ? ` ${row.ivrSamples}` : ""}`}</span>
@@ -200,7 +240,7 @@ function BoardRow({ row, highlight = false }: { row: AmBoardRow; highlight?: boo
 }
 
 function HeatGroup({ g }: { g: AmVrpGroup }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistentState(`amheat:${g.group}`, false);
   return (
     <div>
       <button
@@ -218,7 +258,6 @@ function HeatGroup({ g }: { g: AmVrpGroup }) {
       </button>
       {open && (
         <div className="divide-y divide-border/50 border-t border-border/60 bg-surface-2/30">
-          <BoardHeaderRow />
           {g.members.map((m) => (
             <BoardRow key={m.sym} row={m} />
           ))}
@@ -278,7 +317,7 @@ export function AmReportView({
   underweight?: string[];
   book?: string[];
 }) {
-  const [showSteer, setShowSteer] = useState(false);
+  const [showSteer, setShowSteer] = usePersistentState("am-showsteer", false);
   const sample = report.meta.source === "sample";
   // A board row is green-flagged when it's an actionable CSP candidate: either
   // already underweight (<8.5%) in the book — room to add — OR a high-conviction
@@ -295,17 +334,15 @@ export function AmReportView({
     <div>
       {sample && (
         <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-          Sample data — run <span className="font-mono">python am_report.py</span> to populate with live Robinhood data.
+          Sample data — run <span className="font-mono">python am_report.py</span> to populate with live Schwab data.
         </p>
       )}
 
-      {/* Tablet+: regime and movers sit side by side instead of stacking. */}
-      <div className="md:grid md:items-start md:gap-4">
-        <div className="mt-3">
-          <RegimeBanner r={report.regime} />
-        </div>
-        {report.movers && <Movers movers={report.movers} />}
+      <div className="mt-3">
+        <RegimeBanner r={report.regime} />
       </div>
+
+      {report.movers && <Movers movers={report.movers} />}
 
       <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">CSP Board</h3>
       <p className="mb-2 px-1 text-[10px] text-muted">
@@ -335,14 +372,21 @@ export function AmReportView({
       {report.board.length === 0 ? (
         <Card className="px-4 py-5 text-center text-sm text-muted">No names cleared the gates today.</Card>
       ) : (
-        <div>
-          <Card className="divide-y divide-border p-0">
-            <BoardHeaderRow />
-            {report.board.map((row) => (
-              <BoardRow key={row.sym} row={row} highlight={isFlagged(row)} />
-            ))}
-          </Card>
-        </div>
+        <Card className="divide-y divide-border p-0">
+          <div className={`grid ${BOARD_COLS} items-center gap-1.5 px-3 py-1.5 text-[9px] uppercase tracking-wide text-muted`}>
+            <span className="text-center">Tier</span>
+            <span>Tkr</span>
+            <span>Price</span>
+            <span>Scr</span>
+            <span>VRP</span>
+            <span className="text-right">30D%</span>
+            <span className="text-right">Ann%</span>
+            <span className="text-right">P-Wall</span>
+          </div>
+          {report.board.map((row) => (
+            <BoardRow key={row.sym} row={row} highlight={isFlagged(row)} />
+          ))}
+        </Card>
       )}
 
       {report.meta.earningsLoaded === false && (
@@ -351,39 +395,34 @@ export function AmReportView({
         </p>
       )}
 
-      {/* Tablet+: landmines and the heat map sit side by side. */}
-      <div className="md:grid md:items-start md:gap-4">
-        {report.landmines && report.landmines.length > 0 && (
-          <div>
-            <h3 className="mb-1 mt-5 px-1 text-sm font-semibold text-amber-200">⚠ Landmines</h3>
-            <p className="mb-2 px-1 text-[10px] text-muted">Approved names pulled OFF the board — earnings inside the danger window</p>
-            <Card className="divide-y divide-border p-0">
-              {report.landmines.map((lm) => (
-                <div key={lm.sym} className="flex items-center justify-between px-3 py-2 text-[11px]">
-                  <span className="font-semibold">{lm.sym}</span>
-                  <span className="text-right text-amber-300">
-                    Earnings {lm.erDate ?? "soon"}{lm.erDays != null ? ` · ${lm.erDays}d` : ""}
-                  </span>
-                </div>
-              ))}
-            </Card>
-          </div>
-        )}
+      {report.landmines && report.landmines.length > 0 && (
+        <>
+          <h3 className="mb-1 mt-5 px-1 text-sm font-semibold text-amber-200">⚠ Landmines</h3>
+          <p className="mb-2 px-1 text-[10px] text-muted">Approved names pulled OFF the board — earnings inside the danger window</p>
+          <Card className="divide-y divide-border p-0">
+            {report.landmines.map((lm) => (
+              <div key={lm.sym} className="flex items-center justify-between px-3 py-2 text-[11px]">
+                <span className="font-semibold">{lm.sym}</span>
+                <span className="text-right text-amber-300">
+                  Earnings {lm.erDate ?? "soon"}{lm.erDays != null ? ` · ${lm.erDays}d` : ""}
+                </span>
+              </div>
+            ))}
+          </Card>
+        </>
+      )}
 
-        {report.vrpGroups.length > 0 && (
-          <div>
-            <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">Premium heat map</h3>
-            <p className="mb-2 px-1 text-[10px] text-muted">Where premium is actually fat — VRP (IV vs realized) by group · tap a group for its names</p>
-            <div>
-              <Card className="divide-y divide-border p-0">
-                {report.vrpGroups.map((g) => (
-                  <HeatGroup key={g.group} g={g} />
-                ))}
-              </Card>
-            </div>
-          </div>
-        )}
-      </div>
+      {report.vrpGroups.length > 0 && (
+        <>
+          <h3 className="mb-2 mt-5 px-1 text-sm font-semibold">Premium heat map</h3>
+          <p className="mb-2 px-1 text-[10px] text-muted">Where premium is actually fat — VRP (IV vs realized) by group · tap a group for its names</p>
+          <Card className="divide-y divide-border p-0">
+            {report.vrpGroups.map((g) => (
+              <HeatGroup key={g.group} g={g} />
+            ))}
+          </Card>
+        </>
+      )}
 
       {report.steerClear.length > 0 && (
         <div className="mt-5">

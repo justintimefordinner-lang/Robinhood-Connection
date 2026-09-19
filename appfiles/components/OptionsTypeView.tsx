@@ -4,14 +4,20 @@
 // (default Open) switches between live positions and realized round-trips, so the
 // CSP and LEAP experiences are identical — just a different `type`.
 import { useState } from "react";
+import { usePersistentState } from "@/lib/view-state";
 import Link from "next/link";
 import { Card, Stat } from "@/components/ui";
 import { Amt } from "@/components/privacy";
 import { ClosedOptions } from "@/components/ClosedOptions";
 import { OpenGroupCard } from "@/components/OpenGroupCard";
 import { CspCashPlan, CASH_BUCKETS, cashBucketIndex } from "@/components/CspCashPlan";
-import { cspCollateral, cspInsight, cspRemainingAnnualized, daysToExpiry, fmtMoney, fmtPct, isCashSettledIndex, optionBasis, optionMarketValue, optionPnl, optionPnlPct } from "@/lib/calc";
+import { cspCollateral, cspInsight, daysToExpiry, fmtMoney, fmtPct, isCashSettledIndex, optionBasis, optionMarketValue, optionPnl } from "@/lib/calc";
+import { CSP_DEFAULT_DIR, LEAP_DEFAULT_DIR, nextSort, sortCsps, sortLeaps, type Sort } from "@/lib/option-sort";
 import type { ClosedCSP, ClosedLeap, OptionPosition } from "@/lib/types";
+import { SimulateControls } from "@/components/SimulateControls";
+import { useIvSkew } from "@/lib/simConfig";
+import { simulatePosition, hasSimulatableMove } from "@/lib/simulate";
+import { SimValue } from "@/components/SimValue";
 
 type Status = "open" | "closed";
 
@@ -32,67 +38,19 @@ const CSP_FILTERS: { key: CspFilter; label: string; active: string; idle: string
     idle: "bg-amber-500/10 text-amber-300 ring-amber-500/30 active:bg-amber-500/20",
     dot: "bg-amber-500",
   },
-  {
-    key: "hold",
-    label: "Hold",
-    active: "bg-sky-500/25 text-sky-100 ring-sky-500/50",
-    idle: "bg-surface-2 text-muted ring-border active:bg-surface-2/70",
-    dot: "bg-sky-500",
-  },
 ];
 
-export type CspSortKey = "ticker" | "dte" | "coll" | "plpct" | "pldollar" | "tostrike" | "yr";
+export type CspSortKey = "ticker" | "bb" | "dte" | "coll" | "plpct" | "pldollar" | "tostrike" | "yr";
 export type LeapSortKey = "ticker" | "dte" | "value" | "plpct" | "pldollar" | "delta";
-type SortDir = "asc" | "desc";
-type Sort = { key: string; dir: SortDir };
-const DEFAULT_DIR: Record<string, SortDir> = {
-  ticker: "asc", dte: "asc", coll: "desc", plpct: "desc", pldollar: "desc", tostrike: "asc", yr: "desc",
-  value: "desc", delta: "desc",
-};
-function cspSortVal(o: OptionPosition, key: string): number | string {
-  switch (key) {
-    case "ticker": return o.symbol;
-    case "dte": return daysToExpiry(o.expiration);
-    case "coll": return cspCollateral(o);
-    case "plpct": return optionPnlPct(o);
-    case "pldollar": return optionPnl(o);
-    case "tostrike": return o.underlyingPrice && o.underlyingPrice > 0 ? (o.underlyingPrice - o.strike) / o.underlyingPrice : Infinity;
-    case "yr": return cspRemainingAnnualized(o);
-    default: return 0;
-  }
-}
-function leapSortVal(o: OptionPosition, key: string): number | string {
-  switch (key) {
-    case "ticker": return o.symbol;
-    case "dte": return daysToExpiry(o.expiration);
-    case "value": return optionMarketValue(o);
-    case "plpct": return optionPnlPct(o);
-    case "pldollar": return optionPnl(o);
-    case "delta": return o.delta;
-    default: return 0;
-  }
-}
-function sortBy(items: OptionPosition[], sort: Sort, valFn: (o: OptionPosition, key: string) => number | string): OptionPosition[] {
-  return [...items].sort((a, b) => {
-    const va = valFn(a, sort.key);
-    const vb = valFn(b, sort.key);
-    const aMiss = typeof va === "number" && !isFinite(va);
-    const bMiss = typeof vb === "number" && !isFinite(vb);
-    if (aMiss || bMiss) return aMiss === bMiss ? 0 : aMiss ? 1 : -1; // missing values always last
-    const r = typeof va === "string" ? va.localeCompare(vb as string) : (va as number) - (vb as number);
-    return sort.dir === "asc" ? r : -r;
-  });
-}
-const sortCsps = (items: OptionPosition[], sort: Sort) => sortBy(items, sort, cspSortVal);
-const sortLeaps = (items: OptionPosition[], sort: Sort) => sortBy(items, sort, leapSortVal);
 
 export function OptionsTypeView({
   type,
-  open,
+  open: rawOpen,
   closedCsps,
   closedLeaps,
   initialCspFilter,
   initialStatus = "open",
+  statusFromUrl = false,
   closedMode,
   closedMonths,
 }: {
@@ -102,16 +60,28 @@ export function OptionsTypeView({
   closedLeaps: ClosedLeap[];
   initialCspFilter?: CspFilter; // deep-link from the home action center
   initialStatus?: Status; // deep-link straight to Open or Closed
+  statusFromUrl?: boolean; // true when ?view= set it — then it wins over persisted
   closedMode?: "all" | "ytd" | "months" | "today"; // carry the P&L time window in
   closedMonths?: number;
 }) {
-  const [status, setStatus] = useState<Status>(initialStatus);
+  const [status, setStatus] = usePersistentState<Status>("options-status", initialStatus, statusFromUrl);
   const [cspFilter, setCspFilter] = useState<CspFilter | null>(initialCspFilter ?? null);
   const [cashBucket, setCashBucket] = useState<number | null>(null);
-  const [sort, setSort] = useState<Sort>(type === "csp" ? { key: "yr", dir: "asc" } : { key: "value", dir: "desc" });
+  const [sort, setSort] = usePersistentState<Sort>("options-sort", type === "csp" ? { key: "yr", dir: "asc" } : { key: "value", dir: "desc" });
   const onSort = (key: string) => {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: DEFAULT_DIR[key] ?? "asc" }));
+    setSort((s) => nextSort(s, key, type === "csp" ? CSP_DEFAULT_DIR : LEAP_DEFAULT_DIR));
   };
+
+  // After-hours Simulate: re-price every open leg from its underlying's current price.
+  // Downstream code below reads `open`, so the whole view (stats + tables) follows.
+  const [sim, setSim] = useState(false);
+  const [ivSkew] = useIvSkew();
+  const canSim = hasSimulatableMove(rawOpen);
+  const open = sim && canSim ? rawOpen.map((o) => simulatePosition(o, { ivSkew })) : rawOpen;
+  const simToggle =
+    rawOpen.length > 0 ? (
+      <SimulateControls on={sim && canSim} onToggle={() => setSim((v) => !v)} disabled={!canSim} />
+    ) : undefined;
 
   const noun = type === "csp" ? "CSP" : "LEAP";
   const closedCount = type === "csp" ? closedCsps.length : closedLeaps.length;
@@ -149,6 +119,13 @@ export function OptionsTypeView({
   const value = effectiveOpen.reduce((s, o) => s + optionMarketValue(o), 0);
   const premium = effectiveOpen.reduce((s, o) => s + optionBasis(o), 0);
   const pnl = effectiveOpen.reduce((s, o) => s + optionPnl(o), 0);
+  // Real (pre-sim) counterparts of the shown positions, so the summary cards can read
+  // before → after when Simulate is on. Membership matches the current view; the real
+  // values come from each position's raw pre-sim mark, matched by id.
+  const rawById = new Map(rawOpen.map((o) => [o.id, o]));
+  const effReal = effectiveOpen.map((o) => rawById.get(o.id) ?? o);
+  const valueReal = effReal.reduce((s, o) => s + optionMarketValue(o), 0);
+  const pnlReal = effReal.reduce((s, o) => s + optionPnl(o), 0);
 
   // CSP collateral cards — mirror the Closed view so Open/Closed read uniformly.
   // All open CSPs are concurrent right now, so committed collateral IS the peak.
@@ -194,7 +171,7 @@ export function OptionsTypeView({
     cspFilter === "atrisk"
       ? "No CSPs at risk of assignment."
       : cspFilter === "rollable"
-        ? "No CSPs are rollable yet (all still hold >30% of their credit)."
+        ? "No CSPs are rollable yet (all still yield ≥25% annualized on remaining premium)."
         : cspFilter === "hold"
           ? "No CSPs in the hold bucket."
           : "No open CSPs.";
@@ -245,14 +222,9 @@ export function OptionsTypeView({
               {type === "csp" ? (
                 <Stat label="Premium value" value={<Amt>{fmtMoney(premium)}</Amt>} sub="collected" />
               ) : (
-                <Stat label="Market value" value={<Amt>{fmtMoney(value)}</Amt>} sub={`${effectiveOpen.length} open`} />
+                <Stat label="Market value" value={<SimValue oldV={valueReal} newV={value} />} sub={`${effectiveOpen.length} open`} />
               )}
-              <Stat
-                label="Gain/Loss"
-                value={<Amt>{`${pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(pnl))}`}</Amt>}
-                tone={pnl >= 0 ? "pos" : "neg"}
-                sub="unrealized"
-              />
+              <Stat label="Gain/Loss" value={<SimValue oldV={pnlReal} newV={pnl} signed />} sub="unrealized" />
               {type === "csp" && (
                 <>
                   <Stat label="Collateral" value={<Amt>{fmtMoney(collateral)}</Amt>} sub="committed" />
@@ -276,17 +248,25 @@ export function OptionsTypeView({
               </div>
             )}
             {cspFilterBar}
-            {groups.map((g) => (
+            {sim && canSim && (
+              <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
+                Projected from the current underlying (after-hours) via Δ/Γ — marks, P/L and yields are estimates, not
+                Schwab close values.
+              </p>
+            )}
+            {groups.map((g, gi) => (
               <OpenGroupCard
                 key={g.title}
                 title={g.title}
                 note={g.note}
                 items={g.items}
                 variant={g.variant}
-                action={g.action}
+                action={gi === 0 ? simToggle : g.action}
                 emptyLabel={g.emptyLabel}
                 sort={sort}
                 onSort={onSort}
+                realById={rawById}
+                sim={sim && canSim}
               />
             ))}
             {type === "csp" && <CspCashPlan csps={open} selected={cashBucket} onSelect={setCashBucket} />}

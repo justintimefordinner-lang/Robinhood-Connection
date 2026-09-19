@@ -4,21 +4,22 @@
 // plus a credit ledger. Mirrors the CSP table — collateral becomes the spread's
 // capital at risk, and Yr% is the annualized return on the remaining spread value
 // (the close/roll catalyst for credit spreads).
-import { useState } from "react";
+import { usePersistentState } from "@/lib/view-state";
 import type { ReactNode } from "react";
 import { Card, SectionTitle } from "@/components/ui";
 import { Amt } from "@/components/privacy";
-import { compactMoney, plPctClass, yrClass } from "@/components/OptionRow";
-import { daysBetween, daysToExpiry, fmtMoney, fmtPct } from "@/lib/calc";
-import { spreadInsight, type Spread } from "@/lib/spread";
+import { compactMoney, plPctClass, yrClass, SimCell } from "@/components/OptionRow";
+import { daysBetween, daysToExpiry, fmtMoney, fmtPct, bbSigmaText, bbSigmaZone, bbSigmaColor } from "@/lib/calc";
+import { type Spread } from "@/lib/spread";
 import { CopyButton } from "@/components/CopyButton";
 import { formatSpreadCopy } from "@/lib/position-copy";
 
-// Spread · DTE · Risk · P/L % · P/L $ · To Strk · Yr %
-export const SPREAD_COLS = "grid grid-cols-[1.55fr_0.4fr_0.74fr_0.68fr_0.74fr_0.66fr_0.62fr] items-center gap-x-1";
+// Spread · Last · DTE · Risk · P/L % · P/L $ · To Strk · Yr %
+export const SPREAD_COLS = "grid grid-cols-[1.3fr_0.7fr_0.4fr_0.72fr_0.66fr_0.72fr_0.64fr_0.6fr] items-center gap-x-1";
 
 const SPREAD_HEADERS: { key: string; label: string; right?: boolean }[] = [
   { key: "ticker", label: "Spread" },
+  { key: "bb", label: "BBσ", right: true },
   { key: "dte", label: "DTE", right: true },
   { key: "risk", label: "Risk", right: true },
   { key: "plpct", label: "P/L %", right: true },
@@ -34,6 +35,9 @@ export function SpreadGroupCard({
   emptyLabel = "No open spreads.",
   sort,
   onSort,
+  action,
+  realById,
+  sim,
 }: {
   title: string;
   note?: string;
@@ -41,6 +45,9 @@ export function SpreadGroupCard({
   emptyLabel?: string;
   sort?: { key: string; dir: "asc" | "desc" };
   onSort?: (key: string) => void;
+  action?: ReactNode;
+  realById?: Map<string, Spread>;
+  sim?: boolean;
 }) {
   const credit = spreads.reduce((s, x) => s + x.maxProfit, 0);
   const curValue = spreads.reduce((s, x) => s + x.netMark * 100 * x.qty, 0);
@@ -48,7 +55,7 @@ export function SpreadGroupCard({
 
   return (
     <div>
-      <SectionTitle>
+      <SectionTitle action={action}>
         {title} <span className="font-normal text-muted">· {spreads.length}</span>
       </SectionTitle>
       {note && spreads.length > 0 && <p className="-mt-1 mb-2 px-1 text-[11px] text-muted">{note}</p>}
@@ -72,7 +79,7 @@ export function SpreadGroupCard({
             })}
           </div>
           {spreads.map((sp) => (
-            <SpreadRow key={sp.id} sp={sp} />
+            <SpreadRow key={sp.id} sp={sp} real={realById?.get(sp.id)} sim={sim} />
           ))}
           <div className="space-y-1 px-4 py-2.5 text-[11px]">
             <div className="flex items-center justify-between">
@@ -100,8 +107,11 @@ export function SpreadGroupCard({
   );
 }
 
-function SpreadRow({ sp }: { sp: Spread }) {
-  const [open, setOpen] = useState(false);
+function SpreadRow({ sp, real, sim }: { sp: Spread; real?: Spread; sim?: boolean }) {
+  const [open, setOpen] = usePersistentState(`spreadrow:${sp.id}`, false);
+  const simActive = !!(sim && real);
+  const showPnl = simActive && Math.abs(sp.pnl - real!.pnl) >= 0.005;
+  const showPct = simActive && Math.abs(sp.pnlPct - real!.pnlPct) >= 0.00005;
   return (
     <div>
       <button
@@ -114,20 +124,32 @@ function SpreadRow({ sp }: { sp: Spread }) {
             ${sp.shortStrike}/${sp.longStrike} · ×{sp.qty}
           </div>
         </div>
+        <span className={`tabular text-right ${bbSigmaColor(sp.short.bbSigma)}`}>
+          {sp.short.bbSigma == null ? "—" : `${sp.short.bbSigma > 0 ? "+" : ""}${sp.short.bbSigma.toFixed(1)}`}
+        </span>
         <span className={`tabular ${sp.dte <= 21 ? "justify-self-end rounded px-1 py-0.5 bg-emerald-500/25 text-emerald-100" : "text-right"}`}>{sp.dte}</span>
         <span className="tabular text-right">
           <Amt>{compactMoney(sp.collateral)}</Amt>
         </span>
-        <span className={`tabular justify-self-end rounded px-1 py-0.5 ${plPctClass(sp.pnlPct)}`}>
-          {sp.pnlPct >= 0 ? "+" : ""}
-          {(sp.pnlPct * 100).toFixed(0)}%
-        </span>
-        <span className={`tabular text-right ${sp.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-          <Amt>{`${sp.pnl >= 0 ? "+" : "−"}${compactMoney(Math.abs(sp.pnl))}`}</Amt>
-        </span>
-        <span className={`tabular text-right ${sp.toStrike != null && sp.toStrike < 0 ? "text-rose-400" : ""}`}>
-          {sp.toStrike == null ? "—" : `${(sp.toStrike * 100).toFixed(1)}%`}
-        </span>
+        <SimCell show={showPct} real={<>{real!.pnlPct >= 0 ? "+" : ""}{(real!.pnlPct * 100).toFixed(0)}%</>}>
+          <span className={`tabular justify-self-end rounded px-1 py-0.5 ${plPctClass(sp.pnlPct)}`}>
+            {sp.pnlPct >= 0 ? "+" : ""}
+            {(sp.pnlPct * 100).toFixed(0)}%
+          </span>
+        </SimCell>
+        <SimCell show={showPnl} real={<Amt>{`${real!.pnl >= 0 ? "+" : "−"}${compactMoney(Math.abs(real!.pnl))}`}</Amt>}>
+          <span className={`tabular text-right ${sp.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            <Amt>{`${sp.pnl >= 0 ? "+" : "−"}${compactMoney(Math.abs(sp.pnl))}`}</Amt>
+          </span>
+        </SimCell>
+        <div className="text-right">
+          <div className={`tabular ${sp.toStrike != null && sp.toStrike < 0 ? "text-rose-400" : ""}`}>
+            {sp.toStrike == null ? "—" : `${(sp.toStrike * 100).toFixed(1)}%`}
+          </div>
+          <div className="tabular text-[10px] text-muted">
+            {sp.underlyingPrice && sp.underlyingPrice > 0 ? `$${sp.underlyingPrice >= 100 ? Math.round(sp.underlyingPrice).toLocaleString() : sp.underlyingPrice.toFixed(2)}` : "—"}
+          </div>
+        </div>
         <span className={`tabular justify-self-end rounded px-1 py-0.5 ${yrClass(sp.yr)}`}>
           {(sp.yr * 100).toFixed(1)}%
         </span>
@@ -185,6 +207,12 @@ function SpreadDetail({ sp }: { sp: Spread }) {
           k="To short strike"
           v={sp.toStrike == null ? "—" : <span className={sp.toStrike < 0 ? "text-rose-400" : ""}>{`${(sp.toStrike * 100).toFixed(1)}%`}{sp.underlyingPrice ? ` (px $${sp.underlyingPrice.toFixed(2)})` : ""}</span>}
         />
+        {sp.short.bbSigma != null && (
+          <Row
+            k="Short strike vs BB"
+            v={<span className={bbSigmaColor(sp.short.bbSigma)}>{bbSigmaText(sp.short.bbSigma)} · {bbSigmaZone(sp.short.bbSigma)}</span>}
+          />
+        )}
         <div className="!mt-2 border-t border-border pt-2 text-[11px] text-muted">
           <div className="flex items-center justify-between">
             <span>Short ${sp.short.strike} {sp.optionType}</span>
@@ -196,16 +224,6 @@ function SpreadDetail({ sp }: { sp: Spread }) {
           </div>
         </div>
       </dl>
-      {(() => {
-        const ins = spreadInsight(sp);
-        const manage = ins.action === "manage";
-        return (
-          <div className={`mt-3 flex items-start gap-2 rounded-lg p-2 text-xs ring-1 ring-inset ${manage ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" : "bg-sky-500/15 text-sky-300 ring-sky-500/30"}`}>
-            <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${manage ? "bg-emerald-500" : "bg-sky-500"}`} />
-            <span><span className="font-semibold">{ins.label}:</span> {ins.detail}</span>
-          </div>
-        );
-      })()}
       <CopyButton text={formatSpreadCopy(sp)} />
     </div>
   );

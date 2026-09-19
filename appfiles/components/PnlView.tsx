@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { usePersistentSet, usePersistentState } from "@/lib/view-state";
 import Link from "next/link";
 import { Card, SectionTitle, Stat } from "@/components/ui";
 import { Amt } from "@/components/privacy";
@@ -86,8 +87,8 @@ interface BucketAgg {
 
 export function PnlView({ realized, open }: { realized: BucketInput[]; open: BucketInput[] }) {
   const tf = useTimeFilter("months", 1); // default to the last 1 month
-  const [mode, setMode] = useState<"realized" | "open">("realized");
-  const [term, setTerm] = useState<TermFilter>("both");
+  const [mode, setMode] = usePersistentState<"realized" | "open">("pnl-mode", "realized");
+  const [term, setTerm] = usePersistentState<TermFilter>("pnl-term", "both");
   const [cumScrub, setCumScrub] = useState<number | null>(null);
 
   const isRealized = mode === "realized";
@@ -125,16 +126,6 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
   // Press-and-drag on the cumulative chart shows the running realized P&L at a past point.
   const cumPoint =
     cumScrub !== null && cumScrub >= 0 && cumScrub < cumulative.length ? cumulative[cumScrub] : null;
-
-  // Realized P&L bucketed by calendar month, for the By-month bar chart.
-  const monthly = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const it of dated) {
-      const key = it.date.slice(0, 7); // YYYY-MM
-      m.set(key, (m.get(key) ?? 0) + it.pnl);
-    }
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, pnl]) => ({ key, pnl }));
-  }, [dated]);
 
   const total = buckets.reduce((s, b) => s + b.pnl, 0);
   const totalCount = buckets.reduce((s, b) => s + b.count, 0);
@@ -176,19 +167,8 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
   }, [source, isRealized, range, term]);
 
   const tickerMaxAbs = tickers.reduce((m, t) => Math.max(m, Math.abs(t.pnl)), 0);
-  const [showAllTickers, setShowAllTickers] = useState(false);
-  const [openSyms, setOpenSyms] = useState<Set<string>>(new Set());
-  const symOpen = useCallback((id: string) => openSyms.has(id), [openSyms]);
-  const toggleSym = useCallback(
-    (id: string) =>
-      setOpenSyms((prev) => {
-        const n = new Set(prev);
-        if (n.has(id)) n.delete(id);
-        else n.add(id);
-        return n;
-      }),
-    [],
-  );
+  const [showAllTickers, setShowAllTickers] = usePersistentState("pnl-showall", false);
+  const { has: symOpen, toggle: toggleSym } = usePersistentSet("pnl-opensyms");
   const TICKER_CAP = 8;
   const shownTickers = showAllTickers ? tickers : tickers.slice(0, TICKER_CAP);
 
@@ -205,6 +185,30 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
     }
     return `${route}?${params.toString()}`;
   };
+
+  // Per-strategy ticker leaderboard for the By-strategy drill-down: the same filtered
+  // items grouped by underlying, best P&L first, capped at ten. Each row deep-links to
+  // that strategy's page filtered to the ticker (via stratHref).
+  const STRAT_TICKER_CAP = 10;
+  interface StratTicker { sym: string; pnl: number; count: number }
+  const strategyTickers = useMemo<Record<string, { top: StratTicker[]; total: number }>>(() => {
+    const out: Record<string, { top: StratTicker[]; total: number }> = {};
+    for (const b of source) {
+      const items = (isRealized ? b.items.filter((it) => (it.date ? inRange(it.date, range) : true)) : b.items).filter((it) => keepTerm(term, it.daysHeld));
+      const m = new Map<string, { pnl: number; count: number }>();
+      for (const it of items) {
+        const sym = (it.sym ?? "—").toUpperCase();
+        const agg = m.get(sym) ?? { pnl: 0, count: 0 };
+        agg.pnl += it.pnl;
+        agg.count += 1;
+        m.set(sym, agg);
+      }
+      const all = [...m.entries()].map(([sym, v]) => ({ sym, ...v })).sort((a, c) => c.pnl - a.pnl);
+      out[b.key] = { top: all.slice(0, STRAT_TICKER_CAP), total: all.length };
+    }
+    return out;
+  }, [source, isRealized, range, term]);
+  const { has: stratOpen, toggle: toggleStrat } = usePersistentSet("pnl-openstrats");
 
   return (
     <div className="pb-24 pt-3 sm:pb-6">
@@ -230,6 +234,10 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
         </div>
       )}
 
+      {/* Tablet layout: hero beside the win-rate and gross tiles, then By
+          strategy beside By ticker. Phone: the same blocks stacked, unchanged. */}
+      <div className="tablet:grid tablet:grid-cols-[3fr_2fr] tablet:gap-x-4 tablet:items-start">
+      <div>
       {/* Hero total */}
       <Card className="mt-3 px-4 py-4">
         <div className="text-xs text-muted">
@@ -282,7 +290,8 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
           </div>
         )}
       </Card>
-
+      </div>
+      <div>
       {/* Win rate */}
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Stat
@@ -307,17 +316,11 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
         <Stat label="Gross profit" value={<Amt>{signed(winDollars)}</Amt>} tone="pos" />
         <Stat label="Gross loss" value={<Amt>{lossDollars > 0 ? signed(-lossDollars) : fmtMoney(0)}</Amt>} tone="neg" />
       </div>
+      </div>
+      </div>
 
-      {/* Monthly P&L bars (realized) */}
-      {isRealized && monthly.length > 0 && (
-        <>
-          <SectionTitle>By month</SectionTitle>
-          <Card className="px-4 py-3">
-            <MonthlyBars months={monthly} />
-          </Card>
-        </>
-      )}
-
+      <div className="tablet:grid tablet:grid-cols-2 tablet:gap-x-4 tablet:items-start">
+      <div>
       {/* By strategy */}
       <SectionTitle>By strategy</SectionTitle>
       {buckets.length === 0 ? (
@@ -327,41 +330,91 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
       ) : (
         <Card className="divide-y divide-border">
           {buckets.map((b) => {
+            // Tapping a strategy expands its top tickers in place; each ticker row
+            // then deep-links to that strategy's page filtered to the symbol. The
+            // whole-strategy destination survives as the "All …" link in the panel.
             const route = STRATEGY_ROUTE[b.key];
-            const inner = (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${ACCENT[b.key] ?? "bg-slate-400"}`} />
-                    <span className="text-sm font-medium">{b.label}</span>
-                    <span className="tabular rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{b.count}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <span className={`tabular text-sm font-semibold ${b.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            const isOpen = stratOpen(b.key);
+            const drill = strategyTickers[b.key] ?? { top: [], total: 0 };
+            const allHref = route
+              ? `${route}?view=${isRealized ? "closed" : "open"}${isRealized ? `&range=${tf.mode}&months=${tf.months}` : ""}`
+              : null;
+            return (
+              <div key={b.key}>
+                <button onClick={() => toggleStrat(b.key)} className="block w-full px-4 py-3 text-left active:bg-surface-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="w-3 shrink-0 text-[10px] text-muted">{isOpen ? "▾" : "▸"}</span>
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${ACCENT[b.key] ?? "bg-slate-400"}`} />
+                      <span className="text-sm font-medium">{b.label}</span>
+                      <span className="tabular rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{b.count}</span>
+                    </div>
+                    <span className={`tabular shrink-0 text-sm font-semibold ${b.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       <Amt>{signed(b.pnl)}</Amt>
                     </span>
-                    {route && <span className="text-muted">›</span>}
                   </div>
-                </div>
-                <div className="mt-2">
-                  <DivergingBar pnl={b.pnl} maxAbs={maxAbs} />
-                </div>
-                <div className="mt-1.5 flex justify-between text-[10px] text-muted">
-                  <span>
-                    {b.wins}/{b.count} {isRealized ? "profitable" : "in profit"}
-                    {b.count > 0 && ` · ${Math.round((b.wins / b.count) * 100)}%`}
-                  </span>
-                  <span className="tabular">{total !== 0 ? `${Math.round((b.pnl / Math.abs(total)) * 100)}% of net` : ""}</span>
-                </div>
-              </>
-            );
-            return route ? (
-              <Link key={b.key} href={`${route}?view=${isRealized ? "closed" : "open"}${isRealized ? `&range=${tf.mode}&months=${tf.months}` : ""}`} className="block px-4 py-3 active:bg-surface-2">
-                {inner}
-              </Link>
-            ) : (
-              <div key={b.key} className="px-4 py-3">
-                {inner}
+                  <div className="mt-2">
+                    <DivergingBar pnl={b.pnl} maxAbs={maxAbs} />
+                  </div>
+                  <div className="mt-1.5 flex justify-between text-[10px] text-muted">
+                    <span>
+                      {b.wins}/{b.count} {isRealized ? "profitable" : "in profit"}
+                      {b.count > 0 && ` · ${Math.round((b.wins / b.count) * 100)}%`}
+                    </span>
+                    <span className="tabular">{total !== 0 ? `${Math.round((b.pnl / Math.abs(total)) * 100)}% of net` : ""}</span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t border-border/50 bg-surface-2/30 px-4 py-2">
+                    <div className="flex items-center justify-between text-[10px] text-muted">
+                      <span>
+                        {drill.total > STRAT_TICKER_CAP
+                          ? `Top ${STRAT_TICKER_CAP} of ${drill.total} tickers`
+                          : `${drill.total} ${drill.total === 1 ? "ticker" : "tickers"}`}
+                        {" · largest to smallest"}
+                      </span>
+                      {allHref && (
+                        <Link href={allHref} className="font-medium text-sky-400 active:opacity-70">
+                          All {b.label} ›
+                        </Link>
+                      )}
+                    </div>
+                    <div className="mt-1 border-t border-border/40 pt-1">
+                      {drill.top.map((t) => {
+                        const href = stratHref(b.key, t.sym);
+                        const rowInner = (
+                          <div className="flex items-center justify-between gap-2 text-[11px]">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.pnl >= 0 ? "bg-emerald-400" : "bg-rose-400"}`} />
+                              <span className="font-semibold">{t.sym}</span>
+                              <span className="tabular rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{t.count}</span>
+                            </div>
+                            <span className="flex shrink-0 items-center gap-1">
+                              <span className={`tabular ${t.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                <Amt>{signed(t.pnl)}</Amt>
+                              </span>
+                              {href && <span className="text-[10px] text-muted">›</span>}
+                            </span>
+                          </div>
+                        );
+                        return href ? (
+                          <Link
+                            key={t.sym}
+                            href={href}
+                            className="-mx-1 block rounded-md px-1 py-1.5 active:bg-surface-2"
+                            title={`View ${SHORT_LABEL[b.key] ?? b.label} for ${t.sym}`}
+                          >
+                            {rowInner}
+                          </Link>
+                        ) : (
+                          <div key={t.sym} className="py-1.5">
+                            {rowInner}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -373,7 +426,9 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
           ? "Realized P&L from reconstructed closed round-trips (FIFO). Stocks include assignment cost basis where available."
           : "Open P&L is current unrealized mark-to-market on live positions, grouped by strategy."}
       </p>
+      </div>
 
+      <div>
       {/* By ticker */}
       <SectionTitle>By ticker</SectionTitle>
       {tickers.length === 0 ? (
@@ -469,6 +524,8 @@ export function PnlView({ realized, open }: { realized: BucketInput[]; open: Buc
           )}
         </>
       )}
+      </div>
+      </div>
     </div>
   );
 }
@@ -575,37 +632,6 @@ function CumulativeChart({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-// Realized P&L per calendar month — positive bars above the axis, negative below.
-function MonthlyBars({ months }: { months: { key: string; pnl: number }[] }) {
-  const maxAbs = Math.max(1, ...months.map((m) => Math.abs(m.pnl)));
-  const label = (k: string) => {
-    const m = Number(k.split("-")[1]);
-    return ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m] ?? k;
-  };
-  return (
-    <div className="flex items-end justify-between gap-1.5">
-      {months.map((m) => {
-        const h = (Math.abs(m.pnl) / maxAbs) * 38;
-        const pos = m.pnl >= 0;
-        return (
-          <div key={m.key} className="flex flex-1 flex-col items-center">
-            <div className="flex w-full flex-col items-center">
-              <div className="flex h-[40px] w-full items-end justify-center">
-                {pos && <div className="w-3 rounded-t bg-emerald-500/70" style={{ height: `${h}px` }} />}
-              </div>
-              <div className="h-px w-full bg-border" />
-              <div className="flex h-[40px] w-full items-start justify-center">
-                {!pos && <div className="w-3 rounded-b bg-rose-500/70" style={{ height: `${h}px` }} />}
-              </div>
-            </div>
-            <div className="mt-1 text-[9px] text-muted">{label(m.key)}</div>
-          </div>
-        );
-      })}
     </div>
   );
 }

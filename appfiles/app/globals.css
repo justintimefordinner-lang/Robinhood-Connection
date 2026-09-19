@@ -1,12 +1,5 @@
 @import "tailwindcss";
 
-/* Targets real desktop pointers (mouse + hover capable) — NOT touch devices.
-   A tablet is touch/coarse-pointer even at desktop-sized widths, so gating the
-   phone-mockup preview frame on this instead of a raw width breakpoint means
-   tablets get the real, full-width responsive layout instead of being shrunk
-   into a 400px phone frame the way a resized desktop browser window is. */
-@custom-variant pointer-fine (@media (hover: hover) and (pointer: fine));
-
 :root {
   --bg: #0a0e14;
   --surface: #121826;
@@ -26,16 +19,36 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Tablet layout (lib/layout-mode.ts). <html data-layout="tablet"> switches the
+   shell from the phone frame to the 1024px canvas with a side rail; pages opt
+   into wider grids with the tablet: variant. :is() keeps the class specificity
+   above the sm: phone-frame utilities it has to override. */
+@custom-variant tablet (&:is([data-layout="tablet"] *));
+
+/* Text-heavy pages that have no tablet grid of their own stay a readable
+   column; pages that lay themselves out on a grid opt out with data-wide. */
+[data-layout="tablet"] main:not([data-wide]) {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
 html {
+  height: 100%;
+  /* The app shell (see layout.tsx) owns scrolling, so the document itself never
+     scrolls. That keeps the mobile browser toolbar from collapsing mid-scroll and
+     shoving the fixed bottom nav up into the page. */
+  overflow: hidden;
   scroll-padding-top: 4.5rem;
   -webkit-text-size-adjust: 100%;
-  overscroll-behavior-y: none;
 }
 
 body {
+  height: 100%;
+  overflow: hidden; /* scrolling lives inside the shell, not the document */
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  overscroll-behavior-y: none;
 }
 
 /* Hide scrollbars on horizontal chip rows but keep scrollability */
@@ -59,48 +72,8 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Swipe-to-navigate sliding animation (see components/SwipeNav.tsx). Only
-   fires in browsers that support the View Transitions API — everywhere else
-   navigation is just instant, no animation, no breakage. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 240ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Swiped left -> moving to the next tab: current page exits to the left,
-   next page slides in from the right. */
-html[data-swipe-dir="left"]::view-transition-old(root) {
-  animation-name: swipe-out-left;
-}
-html[data-swipe-dir="left"]::view-transition-new(root) {
-  animation-name: swipe-in-right;
-}
-
-/* Swiped right -> moving to the previous tab: mirror image. */
-html[data-swipe-dir="right"]::view-transition-old(root) {
-  animation-name: swipe-out-right;
-}
-html[data-swipe-dir="right"]::view-transition-new(root) {
-  animation-name: swipe-in-left;
-}
-
-@keyframes swipe-out-left {
-  to { transform: translateX(-100%); }
-}
-@keyframes swipe-in-right {
-  from { transform: translateX(100%); }
-}
-@keyframes swipe-out-right {
-  to { transform: translateX(100%); }
-}
-@keyframes swipe-in-left {
-  from { transform: translateX(-100%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation: none !important;
-  }
+/* Progress bar on the "keep holding to chart" pill (components/TickerLongPress.tsx). */
+@keyframes hold-fill {
+  from { width: 0; }
+  to { width: 100%; }
 }

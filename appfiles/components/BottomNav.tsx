@@ -2,26 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSwipeGesture } from "@/components/SwipeNav";
 
-const TABS = [
+export const TABS = [
   { href: "/", label: "Home", icon: HomeIcon },
   { href: "/options", label: "Options", icon: OptionsIcon },
   { href: "/pnl", label: "P&L", icon: PnlIcon },
-  { href: "/vix", label: "VIX", icon: VixIcon },
+  { href: "/vix", label: "VIX/VXN", icon: VixIcon },
   { href: "/briefing", label: "Brief", icon: BriefIcon },
   { href: "/research", label: "Research", icon: SearchIcon },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
-  const swipe = useSwipeGesture();
 
   return (
     <nav
-      className="static z-50 shrink-0 border-t border-border bg-surface/95 backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-surface/95 backdrop-blur sm:static sm:shrink-0 tablet:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      {...swipe}
     >
       <ul className="mx-auto flex max-w-md items-stretch justify-around">
         {TABS.map(({ href, label, icon: Icon }) => {

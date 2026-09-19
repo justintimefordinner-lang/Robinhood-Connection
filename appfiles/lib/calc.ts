@@ -1,6 +1,6 @@
 // Derived metrics, formatting, and the rule-based insight engine.
 // All "what should I do" logic lives here so it can be tested and grown.
-import type { CryptoHolding, Equity, OptionPosition } from "./types";
+import type { CryptoHolding, Equity, OptionPosition, PortfolioSummary } from "./types";
 
 const MULT = 100; // standard options contract multiplier
 
@@ -105,6 +105,16 @@ export function cspEarningsFlag(
   return (er - exp) / 86_400_000 <= 7 ? "near" : null;
 }
 
+// A covered call written under water: assignment at this strike would sell the
+// shares for less than they cost. The mirror of the emerald "above cost"
+// treatment on the covered-call ladders in StocksView — same comparison, other
+// side. No basis on file (shares held outside this account, or a zero cost) is
+// unknown rather than below, so it flags nothing.
+export function strikeBelowCost(strike: number, avgCost: number | null | undefined): boolean {
+  if (avgCost == null || !(avgCost > 0)) return false;
+  return strike < avgCost;
+}
+
 /** For a short premium-selling position: fraction of credit already captured. */
 export function capturedPct(o: OptionPosition): number {
   if (o.entryPerShare === 0) return 0;
@@ -116,12 +126,38 @@ export function cspCollateral(o: OptionPosition): number {
   return o.strike * MULT * o.qty;
 }
 
-// Cushion from the underlying down to the strike (to-strike %). Positive = out of
-// the money (safe), negative = in the money (assignment risk). Null when we don't
+// Cushion from the underlying to the strike (to-strike %). Positive = out of
+// the money (safe), negative = in the money (assignment risk). For short puts
+// that's down to the strike; for short calls it's up to the strike (sign
+// flips so the safe/at-risk meaning holds either way). Null when we don't
 // have an underlying mark.
 export function cspToStrike(o: OptionPosition): number | null {
   const up = o.underlyingPrice;
-  return up && up > 0 ? (up - o.strike) / up : null;
+  if (!up || up <= 0) return null;
+  return o.optionType === "call" ? (o.strike - up) / up : (up - o.strike) / up;
+}
+
+// Bollinger position of a strike: σ from the underlying's 20-day mean (−2 = lower
+// band, 0 = mean, +2 = upper band), computed by the bridge. For a short put, further
+// below the mean (more negative σ) is a deeper, more mean-reversion-friendly strike.
+export function bbSigmaText(sigma: number | null | undefined): string {
+  if (sigma == null) return "—";
+  return `${sigma > 0 ? "+" : ""}${sigma.toFixed(1)}σ`;
+}
+export function bbSigmaZone(sigma: number | null | undefined): string {
+  if (sigma == null) return "";
+  if (sigma <= -2) return "below lower band";
+  if (sigma <= -1) return "lower band";
+  if (sigma < 1) return "near mean";
+  if (sigma < 2) return "upper band";
+  return "above upper band";
+}
+export function bbSigmaColor(sigma: number | null | undefined): string {
+  if (sigma == null) return "text-muted";
+  if (sigma <= -2) return "text-emerald-400";
+  if (sigma <= -1) return "text-sky-400";
+  if (sigma < 0.5) return "text-amber-400";
+  return "text-rose-400";
 }
 
 // Shared risk banding by to-strike cushion — the single source for both the cash
@@ -216,6 +252,37 @@ export function spreadRiskCapital(options: OptionPosition[]): number {
   return total;
 }
 /**
+ * Genuine uncommitted ("free") cash — the single source of truth for the Cash
+ * allocation slice AND the VIX reserve math, so the two always agree.
+ *
+ * Free cash = what's left of the account after every deployment (stock, long
+ * LEAP/hedge market value, CSP collateral, spread defined-risk, crypto), PLUS
+ * money-market / sweep balances (SWGXX etc.), which report as equity positions
+ * but are really cash.
+ *
+ * The deployment-derived remainder is floored at 0 BEFORE the sweep balance is
+ * added, so a margin account whose CSP notional exceeds its settled cash still
+ * shows its sweep cash as free — instead of a single `cash − collateral` clamp
+ * swallowing the sweep balance to $0.
+ */
+export function freeCashValue(
+  summary: PortfolioSummary,
+  equities: Equity[],
+  options: OptionPosition[],
+): number {
+  const leapCalls = options.filter((o) => o.kind === "leap-call").reduce((s, o) => s + optionMarketValue(o), 0);
+  const hedge = options.filter((o) => o.kind === "leap-put-hedge").reduce((s, o) => s + optionMarketValue(o), 0);
+  const cspColl = cspCollateralTotal(options);
+  const spread = spreadRiskCapital(options);
+  const moneyMarket = equities
+    .filter((e) => isCashEquivalent(e.symbol))
+    .reduce((s, e) => s + equityValue(e), 0);
+  const deployed = summary.equityValue + leapCalls + hedge + cspColl + spread + summary.cryptoValue;
+  const remainder = Math.max(0, summary.totalValue - deployed);
+  return remainder + moneyMarket;
+}
+
+/**
  * Date a long position first qualifies for long-term capital gains. The IRS rule
  * is "held MORE than one year," so the first eligible day is one year + one day
  * after the open date.
@@ -273,10 +340,7 @@ const LEVEL_RANK: Record<InsightLevel, number> = { manage: 3, roll: 2, watch: 1,
 export function cspInsight(o: OptionPosition): Insight {
   const dte = daysToExpiry(o.expiration);
   const cap = capturedPct(o);
-  // Remaining return = the slice of the original credit still left to capture
-  // (current mark ÷ entry credit). Under 30% means ≥70% is already booked, so
-  // the position is "Rollable" — close/roll to free the collateral.
-  const remaining = o.entryPerShare > 0 ? o.mark / o.entryPerShare : 1;
+  const remAnn = cspRemainingAnnualized(o); // the row's "Yr%" — annualized return on remaining premium
   const itm = Math.abs(o.delta) >= 0.5;
 
   if (itm) {
@@ -286,17 +350,19 @@ export function cspInsight(o: OptionPosition): Insight {
       detail: `In the money (Δ ${o.delta.toFixed(2)}). Roll down & out for a credit, or accept assignment if you want the shares.`,
     };
   }
-  if (remaining < 0.3) {
+  // Rollable once the remaining premium's annualized return (the Yr% column) has
+  // decayed below 25% — the collateral isn't working hard enough; harvest & redeploy.
+  if (remAnn < 0.25) {
     return {
       level: "roll",
       label: "Rollable",
-      detail: `${Math.round(remaining * 100)}% of credit left (${Math.round(cap * 100)}% captured). Roll or close to free the collateral.`,
+      detail: `Remaining premium annualizes to ${Math.round(remAnn * 100)}% (below 25%). Roll or close to redeploy the collateral.`,
     };
   }
   return {
     level: "hold",
     label: "Hold",
-    detail: `${dte} DTE, ${Math.round(cap * 100)}% captured, ${Math.round(remaining * 100)}% of credit left. Let theta work.`,
+    detail: `${dte} DTE, ${Math.round(cap * 100)}% captured, ${Math.round(remAnn * 100)}% annualized on remaining. Let theta work.`,
   };
 }
 
@@ -439,4 +505,53 @@ export function buildAlerts(options: OptionPosition[]): AlertItem[] {
   }
 
   return alerts.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
+}
+
+// ---- Open Positions table ------------------------------------------------
+// Return figures for the wide positions table. Started from jttyeung's fork;
+// the capital base is cspCollateral's GROSS strike notional (this app's
+// convention), and the year is 365 days to match the bridge's closed-trade
+// files, so open and realized figures on the table agree.
+const POSITIONS_DAYS_PER_YEAR = 365;
+
+/** Static return on capital for a short CSP / covered call: credit ÷ collateral.
+ *  Null for anything else. */
+export function positionReturnOnCapital(o: OptionPosition): number | null {
+  if (o.side !== "short" || (o.kind !== "csp" && o.kind !== "covered-call")) return null;
+  const capital = cspCollateral(o);
+  if (capital === 0) return null;
+  return optionBasis(o) / capital;
+}
+
+/** The same return annualized over the ORIGINAL term (open → expiry), so it
+ *  stays put as expiration approaches. Null without openedAt. */
+export function positionAnnualizedReturn(o: OptionPosition): number | null {
+  const ror = positionReturnOnCapital(o);
+  if (ror == null || !o.openedAt) return null;
+  const term = Math.max(daysToExpiry(o.expiration, o.openedAt), 1);
+  return ror * (POSITIONS_DAYS_PER_YEAR / term);
+}
+
+/** Return still on the table, annualized over the days remaining: buy-to-close
+ *  cost ÷ collateral × 365/DTE. Looks forward from today; no openedAt needed. */
+export function positionRemainingAnnualizedReturn(o: OptionPosition): number | null {
+  if (o.side !== "short" || (o.kind !== "csp" && o.kind !== "covered-call")) return null;
+  const capital = cspCollateral(o);
+  if (capital === 0) return null;
+  const dte = Math.max(daysToExpiry(o.expiration), 1);
+  return (optionMarketValue(o) / capital) * (POSITIONS_DAYS_PER_YEAR / dte);
+}
+
+/** The underlying's move today as a fraction, measured against the same price
+ *  the table shows (underlyingPrice first, never a stale extended-hours live
+ *  print), so the number and its percentage can't disagree. */
+export function spotPercentChange(o: {
+  underlyingPrice?: number;
+  underlyingLive?: number | null;
+  underlyingClose?: number | null;
+}): number | null {
+  const current = o.underlyingPrice ?? o.underlyingLive ?? null;
+  const close = o.underlyingClose ?? null;
+  if (current == null || close == null || close === 0) return null;
+  return (current - close) / close;
 }

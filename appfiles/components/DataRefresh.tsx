@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import type { FeedStatus } from "@/lib/refresh-status";
 
 export function StopwatchIcon({ className = "" }: { className?: string }) {
   return (
@@ -26,85 +24,16 @@ export function StopwatchIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function WarningIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="11"
-      height="11"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`-mt-px inline-block shrink-0 ${className}`}
-    >
-      <path d="M12 9v4" />
-      <path d="M10.3 3.9 2.5 17a1.6 1.6 0 0 0 1.4 2.4h16.2a1.6 1.6 0 0 0 1.4-2.4L13.7 3.9a1.6 1.6 0 0 0-2.8 0Z" />
-      <path d="M12 16.2h.01" />
-    </svg>
-  );
-}
-
-function KeyIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="11"
-      height="11"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`-mt-px inline-block shrink-0 ${className}`}
-    >
-      <circle cx="8" cy="15" r="4" />
-      <path d="M10.85 12.15 20 3" />
-      <path d="M16 7 19 4" />
-      <path d="M18.5 4.5 21 7" />
-    </svg>
-  );
-}
-
-function relativeTime(iso: string, nowMs: number): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const secs = Math.max(0, Math.round((nowMs - then) / 1000));
-  if (secs < 60) return "just now";
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
-}
-
-// Live count to the next data refresh. Two independent ways to drive it:
-//   - `status`: a FeedStatus from getRefreshStatus() (the scheduler file) -
-//     used by every page-level caller. Also unlocks two non-countdown
-//     displays: status.status === "login_required" shows a calm amber
-//     "Login needed" badge linking straight to Settings (a known, one-tap
-//     fix - login_guard paused auto-retry, not a real failure), and
-//     status.status === "error" shows a red "failed Xm ago" badge with the
-//     message on hover/long-press for anything else that went wrong.
-//   - `nextAt` + `cadence`: a plain ISO timestamp, for the one caller
-//     (the in-report CSP ladder timer in AmReportView) whose "next refresh"
-//     is computed per-report by am_report.py rather than read from the
-//     scheduler file, and which has its own "fast cadence" (active tape)
-//     styling that isn't a failure state and shouldn't be conflated with one.
-//
-// Ticks each second; shows minutes (the "#"), drops to seconds in the last
-// minute. When it expires it does a soft `router.refresh()` — re-runs the
-// server component and re-reads the JSON, no full reload/flicker — so the
-// screen tracks the file automatically. Stops auto-refreshing if the data is
-// very stale (pusher down).
+// Live count to the next data refresh, off a `nextAt` ISO timestamp written by the
+// pusher. Ticks each second; shows minutes (the "#"), drops to seconds in the last
+// minute. When it expires it does a soft `router.refresh()` — re-runs the server
+// component and re-reads the JSON, no full reload/flicker — so the screen tracks the
+// file automatically. Stops auto-refreshing if the data is very stale (pusher down).
 export function DataRefresh({
-  status,
   nextAt,
   cadence,
   autoRefresh = true,
 }: {
-  status?: FeedStatus;
   nextAt?: string;
   cadence?: "fast" | "base";
   autoRefresh?: boolean;
@@ -118,8 +47,7 @@ export function DataRefresh({
     return () => clearInterval(id);
   }, []);
 
-  const effectiveNextAt = status?.nextAt ?? nextAt;
-  const target = effectiveNextAt ? new Date(effectiveNextAt).getTime() : NaN;
+  const target = nextAt ? new Date(nextAt).getTime() : NaN;
   const valid = !Number.isNaN(target);
   const expiredForMs = valid ? now - target : 0;
   // only auto-refresh in the window just after expiry (≤5 min); beyond that the
@@ -133,31 +61,6 @@ export function DataRefresh({
       router.refresh();
     }
   }, [autoRefresh, justExpired, now, router]);
-
-  if (status?.status === "login_required") {
-    return (
-      <Link
-        href="/settings"
-        title="Robinhood session needs reconnecting - tap to go to Settings"
-        className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-amber-500/20 px-1 py-0.5 align-middle text-[9px] font-semibold tabular text-amber-200 active:bg-amber-500/30"
-      >
-        <KeyIcon /> Login needed
-      </Link>
-    );
-  }
-
-  if (status?.status === "error") {
-    const attemptedAt = status.lastAttemptAt;
-    const rel = attemptedAt ? relativeTime(attemptedAt, now) : "";
-    return (
-      <span
-        title={status.error ? `Last attempt failed: ${status.error}` : "Last attempt failed"}
-        className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-rose-500/20 px-1 py-0.5 align-middle text-[9px] font-semibold tabular text-rose-200"
-      >
-        <WarningIcon /> failed{rel ? ` ${rel}` : ""}
-      </span>
-    );
-  }
 
   if (!valid) return null;
   const secs = Math.round((target - now) / 1000);

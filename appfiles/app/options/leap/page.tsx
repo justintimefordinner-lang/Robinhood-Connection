@@ -5,7 +5,6 @@ import { OptionsTypeView } from "@/components/OptionsTypeView";
 import { TickerBar } from "@/components/TickerBar";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
-import { Freshness } from "@/components/RefreshButton";
 import { getSnapshot } from "@/lib/snapshot";
 import { getSelectedAccount } from "@/lib/account";
 import { getClosedCsps } from "@/lib/csp-closed";
@@ -26,8 +25,8 @@ export default async function OptionsLeapPage({ searchParams }: { searchParams: 
   const allLeaps = data.options.filter(isLeap);
   const tickers = [...new Set(allLeaps.map((o) => o.symbol.toUpperCase()))].sort();
   const open = allLeaps.filter((o) => !sym || o.symbol.toUpperCase() === sym);
-  const closedCsps = (await getClosedCsps()).closed;
-  const closedLeaps = (await getClosedLeaps()).closed;
+  const closedCsps = (await getClosedCsps()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
+  const closedLeaps = (await getClosedLeaps()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
 
   return (
     <main className="px-4">
@@ -38,14 +37,13 @@ export default async function OptionsLeapPage({ searchParams }: { searchParams: 
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <AccountSwitcher accounts={snap.accounts} selectedId={id} />
               <span>· {open.length} open</span>
-              <DataRefresh status={getRefreshStatus().app} />
-              <Freshness generatedAt={snap.meta.generatedAt} />
+              <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />
             </span>
           }
           right={<BackLink />}
         />
         <TickerBar tickers={tickers} active={sym} base="/options/leap" />
-        <OptionsTypeView type="leap" open={open} closedCsps={closedCsps} closedLeaps={closedLeaps} initialStatus={view === "closed" ? "closed" : "open"} closedMode={closedMode} closedMonths={closedMonths} />
+        <OptionsTypeView type="leap" open={open} closedCsps={closedCsps} closedLeaps={closedLeaps} initialStatus={view === "closed" ? "closed" : "open"} statusFromUrl={view === "open" || view === "closed"} closedMode={closedMode} closedMonths={closedMonths} />
       </ShowAmounts>
     </main>
   );

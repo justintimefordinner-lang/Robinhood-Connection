@@ -1,10 +1,13 @@
 "use client";
 
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { usePersistentState } from "@/lib/view-state";
 import { Card } from "@/components/ui";
+import { Sparkline } from "@/components/charts";
 import { MesChart } from "@/components/MesTracker";
 import { fmtMes, type MesQuote } from "@/lib/mes-data";
-import type { VixAssessment, Regime } from "@/lib/vix";
+import type { VixAssessment, Regime, S5fiZone, S5fiTrend } from "@/lib/vix";
+import { assessVxn, compareVixVxn, type VxnRegime } from "@/lib/vxn";
 
 // ---------------------------------------------------------------------------
 // Scale primitive — colored zone segments with the current value as a marker,
@@ -90,6 +93,24 @@ const VIX_ZONES: Zone[] = [
   { upTo: 40, color: "bg-rose-500/55", label: ">30" },
 ];
 
+const VXN_REGIME_TEXT: Record<VxnRegime, string> = {
+  complacency: "text-sky-300",
+  "grind-zone": "text-sky-300",
+  "slight-fear": "text-emerald-300",
+  fear: "text-amber-300",
+  "very-fear": "text-orange-300",
+  "extreme-fear": "text-rose-300",
+};
+
+const VXN_ZONES: Zone[] = [
+  { upTo: 15, color: "bg-sky-600/50", label: "<15" },
+  { upTo: 19, color: "bg-sky-500/45", label: "15–19" },
+  { upTo: 25, color: "bg-emerald-500/45", label: "19–25" },
+  { upTo: 30, color: "bg-amber-500/45", label: "25–30" },
+  { upTo: 35, color: "bg-orange-500/50", label: "30–35" },
+  { upTo: 45, color: "bg-rose-500/55", label: "35+" },
+];
+
 interface IndRow {
   key: string;
   name: string;
@@ -103,7 +124,7 @@ interface IndRow {
   reading?: ReactNode; // color-coded "right now" interpretation
 }
 
-function buildRows(a: VixAssessment, mes?: MesQuote | null): IndRow[] {
+function buildRows(a: VixAssessment, mes?: MesQuote | null, vxn?: number | null): IndRow[] {
   const rows: IndRow[] = [];
   const vix = a.vix;
 
@@ -124,6 +145,25 @@ function buildRows(a: VixAssessment, mes?: MesQuote | null): IndRow[] {
         Now {vix.toFixed(2)} — {a.regimeLabel.toLowerCase()}.
       </span>
     ),
+  });
+
+  // 1b — VXN (Nasdaq-100 vol, a second read alongside VIX — RULE-016)
+  const vxnA = vxn != null ? assessVxn(vxn) : null;
+  const divergence = vxnA != null ? compareVixVxn(a.regime, vxnA.regime) : null;
+  const divergenceColor =
+    divergence == null ? "text-muted" : divergence.tilt === "aligned" ? "text-muted" : divergence.tilt === "tech-hotter" ? "text-amber-300" : "text-sky-300";
+  rows.push({
+    key: "vxn",
+    name: "VXN (Nasdaq-100)",
+    meaning: "Second read — tech/growth vol vs. broad-market VIX",
+    available: vxnA != null,
+    value: vxnA != null ? vxnA.vxn.toFixed(2) : "n/a",
+    band: vxnA != null ? vxnA.regimeLabel : "",
+    valueColor: vxnA != null ? VXN_REGIME_TEXT[vxnA.regime] : "text-text",
+    blurb:
+      "The Nasdaq-100 Volatility Index — the same calculation as the VIX, priced off Nasdaq-100 options instead of the S&P 500. It runs roughly 4 points above VIX structurally, since Nasdaq-100 constituents (heavy in tech/semis/growth) carry higher implied vol than the broader market, so its cash bands are shifted up to match. Read it alongside VIX, not instead of it: when the two regimes disagree, that gap is a sector-tilt hint — Nasdaq/tech-specific stress running hotter or cooler than the broad market — not something the VIX framework alone would show. Informational only; it doesn't gate suggestions.",
+    scale: vxnA != null ? <ScaleBar min={0} max={45} zones={VXN_ZONES} value={vxnA.vxn} /> : undefined,
+    reading: divergence ? <span className={divergenceColor}>{divergence.note}</span> : undefined,
   });
 
   // 2 — Realized vol
@@ -318,6 +358,100 @@ function buildRows(a: VixAssessment, mes?: MesQuote | null): IndRow[] {
       ) : undefined,
   });
 
+  // 8 — S5FI (breadth: % of S&P 500 above their 50-day SMA)
+  const s5 = a.s5fi;
+  const s5zone = a.s5fiZone;
+  const s5trend = a.s5fiTrend;
+  const S5_ZONE_COLOR: Record<S5fiZone, string> = {
+    oversold: "text-emerald-300",
+    rebuilding: "text-sky-300",
+    noTrend: "text-amber-300",
+    constructive: "text-sky-300",
+    overbought: "text-rose-300",
+  };
+  const S5_ZONE_BAND: Record<S5fiZone, string> = {
+    oversold: "oversold",
+    rebuilding: "rebuilding",
+    noTrend: "no trend",
+    constructive: "constructive",
+    overbought: "overbought",
+  };
+  const S5_ZONE_READ: Record<S5fiZone, string> = {
+    oversold: "oversold — a mean-reversion buying zone",
+    rebuilding: "below the danger zone, breadth rebuilding",
+    noTrend: "no-trend chop — breadth gives no edge",
+    constructive: "broad participation",
+    overbought: "overbought — shore up cash",
+  };
+  const S5_TREND_READ: Record<S5fiTrend, string> = {
+    strength: "rising (market strength)",
+    sideways: "flat (sideways)",
+    weakness: "falling (market weakness)",
+  };
+  const S5_TREND_SHORT: Record<S5fiTrend, string> = {
+    strength: "rising",
+    sideways: "flat",
+    weakness: "falling",
+  };
+  const s5weekly = a.s5fiWeekly;
+  const s5slope = a.s5fiSlopeWk;
+  const s5slopeColor = s5slope == null ? "text-muted" : s5slope >= 0 ? "text-emerald-300" : "text-rose-300";
+  rows.push({
+    key: "s5fi",
+    name: "S5FI",
+    meaning: "S&P 500 % above 50-day avg — breadth",
+    available: s5 != null,
+    value: s5 != null ? s5.toFixed(1) : "n/a",
+    band: s5 != null && s5zone ? S5_ZONE_BAND[s5zone] : "",
+    valueColor: s5 == null || !s5zone ? "text-text" : S5_ZONE_COLOR[s5zone],
+    blurb:
+      "S5FI ($SPXA50R) is the share of S&P 500 stocks trading above their own 50-day moving average — a breadth gauge of how broad the trend is, not just where the index sits. Below 20 is washed-out / oversold, historically a mean-reversion buying zone; above 80 is overbought — broad participation that's a spot to shore up cash. The 37–58 middle is a no-trend chop zone where breadth gives no edge. Read it with the weekly slope: a steep up slope is broad strength, flat is sideways, a steep down slope is broadening weakness.",
+    scale:
+      s5 != null ? (
+        <>
+          <ScaleBar
+            min={0}
+            max={100}
+            value={s5}
+            zones={[
+              { upTo: 20, color: "bg-emerald-500/50", label: "oversold" },
+              { upTo: 37, color: "bg-emerald-500/30", label: "low" },
+              { upTo: 58, color: "bg-amber-500/45", label: "no trend" },
+              { upTo: 80, color: "bg-orange-500/45", label: "high" },
+              { upTo: 100, color: "bg-rose-500/55", label: "overbought" },
+            ]}
+          />
+          {s5weekly && s5weekly.length >= 3 && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between text-[10px] text-muted">
+                <span>Weekly closes · last {s5weekly.length}w</span>
+                {s5slope != null && (
+                  <span className={s5slopeColor}>
+                    slope {s5slope >= 0 ? "+" : ""}
+                    {s5slope.toFixed(1)}/wk{s5trend ? ` · ${S5_TREND_SHORT[s5trend]}` : ""}
+                  </span>
+                )}
+              </div>
+              <div className="h-12 overflow-hidden rounded-md bg-surface/50 px-1 ring-1 ring-inset ring-border">
+                <Sparkline
+                  data={s5weekly.map((v, idx) => ({ label: `w${idx + 1}`, value: v }))}
+                  height={48}
+                  positive={(s5slope ?? 0) >= 0}
+                />
+              </div>
+            </div>
+          )}
+        </>
+      ) : undefined,
+    reading:
+      s5 != null && s5zone ? (
+        <span className={S5_ZONE_COLOR[s5zone]}>
+          Now {s5.toFixed(1)} — {S5_ZONE_READ[s5zone]}
+          {s5trend ? `; weekly trend ${S5_TREND_READ[s5trend]}` : ""}.
+        </span>
+      ) : undefined,
+  });
+
   // MES — direction of the S&P futures over the last five sessions. Sourced
   // straight from Yahoo rather than the bridge, so it's optional here.
   if (mes) {
@@ -346,9 +480,9 @@ function buildRows(a: VixAssessment, mes?: MesQuote | null): IndRow[] {
   return rows;
 }
 
-export function VixIndicators({ a, mes }: { a: VixAssessment; mes?: MesQuote | null }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const rows = buildRows(a, mes);
+export function VixIndicators({ a, mes, vxn }: { a: VixAssessment; mes?: MesQuote | null; vxn?: number | null }) {
+  const [open, setOpen] = usePersistentState<string | null>("vix-indicator-open", null);
+  const rows = buildRows(a, mes, vxn);
 
   return (
     <Card className="divide-y divide-border">

@@ -34,7 +34,9 @@ export interface AmLadderLeg {
   spreadPct: number;
   dte: number;
   exp: string;
-  bbSigma: number | null;
+  bbSigma?: number | null; // strike's σ from the 20-day mean (−2 = lower band)
+  pctB?: number | null; // %B: 0 = lower band, 0.5 = mid, 1 = upper band
+  bbZone?: string | null;
 }
 
 export interface AmGamma {
@@ -81,6 +83,8 @@ export interface AmRegime {
   cashRange: string | null;
   volWeather: "deploy" | "hold";
   futures: { sym: string; pct: number }[];
+  s5fi?: number | null; // $SPXA50R breadth level (% of S&P 500 above 50-day SMA)
+  s5fiSlopeWk?: number | null; // weekly-close slope (pts/week)
 }
 
 export interface AmVrpGroup {

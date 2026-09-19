@@ -4,10 +4,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ResearchFile } from "./research-types";
+import { exampleResearch } from "./example-research";
 
 export const RESEARCH_PATH = path.join(process.cwd(), "data", "research.json");
 
-export function getResearch(): ResearchFile | null {
+export function getResearch(example = false): ResearchFile | null {
+  if (example) return exampleResearch;
   try {
     const raw = fs.readFileSync(RESEARCH_PATH, "utf8");
     const parsed = JSON.parse(raw) as ResearchFile;

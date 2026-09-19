@@ -1,7 +1,8 @@
 // Backs the Settings page's refresh-interval controls: reads/writes the
-// four *_PUSH_INTERVAL keys in databridge/.env, which is where auto_push.py
-// actually reads them from (and, since it hot-reloads every ~5s, where a
-// change here takes effect without restarting anything).
+// *_PUSH_INTERVAL keys in schwab-bridge/.env, which is where auto_push.py
+// reads them from (hot-reloaded every ~5s once the bridge reload patch is in,
+// so a change here takes effect without restarting anything).
+import { demoBlocked } from "@/lib/demo";
 import { BRIDGE_ENV_PATH } from "@/lib/bridge-dir";
 import { readEnvFile, writeEnvUpdates } from "@/lib/env-file";
 
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_MINUTES = {
   app: 1, // 60s
+  history: 1, // 60s
   research: 15, // 900s
   amReport: 30, // 1800s
   amLadder: 5, // 300s
@@ -24,6 +26,7 @@ export async function GET() {
   return Response.json({
     intervals: {
       appMinutes: secToMin(env.APP_PUSH_INTERVAL, DEFAULT_MINUTES.app),
+      historyMinutes: secToMin(env.HISTORY_PUSH_INTERVAL, DEFAULT_MINUTES.history),
       researchMinutes: secToMin(env.RESEARCH_PUSH_INTERVAL, DEFAULT_MINUTES.research),
       amReportMinutes: secToMin(env.AM_REPORT_PUSH_INTERVAL, DEFAULT_MINUTES.amReport),
       amLadderMinutes: secToMin(env.AM_LADDER_PUSH_INTERVAL, DEFAULT_MINUTES.amLadder),
@@ -33,6 +36,7 @@ export async function GET() {
 
 interface SettingsBody {
   appMinutes?: number;
+  historyMinutes?: number;
   researchMinutes?: number;
   amReportMinutes?: number;
   amLadderMinutes?: number;
@@ -43,6 +47,8 @@ function isFiniteNonNegative(n: unknown): n is number {
 }
 
 export async function POST(req: Request) {
+  const blocked = demoBlocked();
+  if (blocked) return blocked;
   let body: SettingsBody;
   try {
     body = (await req.json()) as SettingsBody;
@@ -53,6 +59,7 @@ export async function POST(req: Request) {
   const updates: Record<string, string> = {};
   const intervalFields: Array<[keyof SettingsBody, string]> = [
     ["appMinutes", "APP_PUSH_INTERVAL"],
+    ["historyMinutes", "HISTORY_PUSH_INTERVAL"],
     ["researchMinutes", "RESEARCH_PUSH_INTERVAL"],
     ["amReportMinutes", "AM_REPORT_PUSH_INTERVAL"],
     ["amLadderMinutes", "AM_LADDER_PUSH_INTERVAL"],

@@ -1,14 +1,15 @@
 "use client";
 
-// Settings page content: a small accordion-style menu. Each top-level item
-// (e.g. "Refresh intervals", "Robinhood connection") is collapsed by default
-// and expands on tap, so the page can grow more settings sections later
-// without turning into one long scroll of unrelated controls.
-import { useEffect, useState, type ReactNode } from "react";
-
-// ---------------------------------------------------------------------------
-// Shared accordion shell
-// ---------------------------------------------------------------------------
+// Settings page content: a small accordion-style menu. Each top-level item is
+// collapsed by default and expands on tap, so the page can grow more sections
+// later without turning into one long scroll of unrelated controls.
+import { useState, type ReactNode } from "react";
+import { setIvSkew } from "@/lib/simConfig";
+import { SchwabConnect } from "@/components/SchwabConnect";
+import { LayoutToggle } from "@/components/LayoutToggle";
+import { ManualPositions } from "@/components/ManualPositions";
+import type { ManualAccount } from "@/lib/manual-positions";
+import { CombineViews, type CombineAccountOption } from "@/components/CombineViews";
 
 function MenuItem({
   title,
@@ -39,12 +40,30 @@ function MenuItem({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Refresh intervals (moved in from what used to be the whole page)
-// ---------------------------------------------------------------------------
+// Outbound row that matches the accordion items visually but just opens a link.
+function LinkItem({ title, subtitle, href }: { title: string; subtitle?: string; href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center justify-between rounded-2xl border border-border bg-surface px-4 py-3"
+    >
+      <span>
+        <span className="block text-sm font-semibold">{title}</span>
+        {subtitle && <span className="mt-0.5 block text-xs text-muted">{subtitle}</span>}
+      </span>
+      <span className="shrink-0 text-muted">↗</span>
+    </a>
+  );
+}
+
+// Optional tip jar. Kept to a single quiet row at the bottom of the menu.
+const CONTRIBUTE_URL = "https://venmo.com/code?user_id=4313728761726406291&created=1788873302.469609&printed=1";
 
 interface Intervals {
   appMinutes: number;
+  historyMinutes: number;
   researchMinutes: number;
   amReportMinutes: number;
   amLadderMinutes: number;
@@ -52,6 +71,7 @@ interface Intervals {
 
 const INTERVAL_FIELDS: Array<{ key: keyof Intervals; label: string; hint: string }> = [
   { key: "appMinutes", label: "Portfolio snapshot", hint: "Positions, balances, LEAPs/CSPs — the main dashboard data." },
+  { key: "historyMinutes", label: "Trade history", hint: "Closed-trade / transaction history sync." },
   { key: "researchMinutes", label: "Research", hint: "Approved-stock screener and signal refresh." },
   { key: "amReportMinutes", label: "Morning Brief", hint: "Full rebuild of the daily brief." },
   { key: "amLadderMinutes", label: "Put ladder", hint: "Lighter intraday premium refresh." },
@@ -63,23 +83,6 @@ function inputClass() {
 
 function labelClass() {
   return "mb-1 block text-xs font-medium text-muted";
-}
-
-// Renders an ISO timestamp as "3m ago" / "5h ago" / "2d ago" etc. `nowMs` is
-// passed in (rather than read fresh via Date.now() inline) so callers can
-// force a re-render on a timer and get an updated relative string without
-// needing to re-fetch anything from the server.
-function formatRelativeTime(iso: string, nowMs: number): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "unknown";
-  const diffSec = Math.max(0, Math.floor((nowMs - then) / 1000));
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
 }
 
 function IntervalsSection({ initialIntervals }: { initialIntervals: Intervals }) {
@@ -110,8 +113,8 @@ function IntervalsSection({ initialIntervals }: { initialIntervals: Intervals })
   return (
     <form onSubmit={save}>
       <p className="text-xs text-muted">
-        In minutes. Applies automatically within a few seconds — no restart needed. Set to 0 to pause
-        that refresh entirely (existing data stays as-is until you raise it again).
+        In minutes. Applies automatically within a few seconds — no restart needed. Set to 0 to
+        pause that refresh entirely (existing data stays as-is until you raise it again).
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -149,359 +152,128 @@ function IntervalsSection({ initialIntervals }: { initialIntervals: Intervals })
   );
 }
 
-// ---------------------------------------------------------------------------
-// Robinhood connection
-// ---------------------------------------------------------------------------
+function SkewSection({ initialSkew }: { initialSkew: number }) {
+  const [skew, setSkew] = useState(initialSkew);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const STEP = 0.1;
 
-function RobinhoodSection() {
-  // --- Credentials form -----------------------------------------------
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const [credStatus, setCredStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("loading");
-  const [credError, setCredError] = useState("");
-
-  // --- Lockout status ----------------------------------------------------
-  const [lock, setLock] = useState<{
-    locked: boolean;
-    manualRequired: boolean;
-    lockedUntil: string | null;
-    consecutiveFailures: number;
-    lastAttemptAt: string | null;
-    lastErrorType: "rate_limited" | "auth_failed" | "unknown" | null;
-  } | null>(null);
-
-  // --- Reconnect button ----------------------------------------------
-  const [reconnectStatus, setReconnectStatus] = useState<"idle" | "requesting" | "requested" | "error">("idle");
-  const [reconnectError, setReconnectError] = useState("");
-
-  // Ticks every 30s so the "last attempt: Xm/h/d ago" text below stays
-  // current without re-fetching /api/robinhood-status on a timer just for
-  // that — the actual data only changes on load or after a reconnect.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  async function loadCredentials() {
+  async function change(next: number) {
+    const clamped = Math.min(3, Math.max(0, Math.round(next * 10) / 10));
+    setSkew(clamped);
+    setIvSkew(clamped);
+    setStatus("saving");
     try {
-      const res = await fetch("/api/robinhood-credentials");
-      const data = await res.json();
-      setConfigured(!!data.configured);
-      setUsername(data.username || "");
-      setCredStatus("idle");
-    } catch {
-      setCredStatus("error");
-      setCredError("Couldn't load current status.");
-    }
-  }
-
-  async function loadLockStatus() {
-    try {
-      const res = await fetch("/api/robinhood-status");
-      const data = await res.json();
-      setLock({
-        locked: data.locked,
-        manualRequired: !!data.manualRequired,
-        lockedUntil: data.lockedUntil,
-        consecutiveFailures: data.consecutiveFailures,
-        lastAttemptAt: data.lastAttemptAt ?? null,
-        lastErrorType: data.lastErrorType ?? null,
-      });
-      return data.lastAttemptAt as string | null;
-    } catch {
-      setLock(null);
-      return null;
-    }
-  }
-
-  useEffect(() => {
-    loadCredentials();
-    loadLockStatus();
-  }, []);
-
-  async function saveCredentials(e: React.FormEvent) {
-    e.preventDefault();
-    setCredStatus("saving");
-    setCredError("");
-    try {
-      const res = await fetch("/api/robinhood-credentials", {
+      const res = await fetch("/api/sim-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ ivSkew: clamped }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Save failed.");
-      setPassword("");
-      setConfigured(true);
-      setCredStatus("saved");
-      setTimeout(() => setCredStatus("idle"), 3000);
-    } catch (err) {
-      setCredStatus("error");
-      setCredError(err instanceof Error ? err.message : "Save failed.");
-    }
-  }
-
-  async function reconnect() {
-    setReconnectStatus("requesting");
-    setReconnectError("");
-    const baseline = lock?.lastAttemptAt ?? null;
-    try {
-      const res = await fetch("/api/robinhood-reconnect", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Request failed.");
-      setReconnectStatus("requested");
-      // The script can take a while (Robinhood's own challenge/verification
-      // flow, per the 429s we've seen, doesn't fail fast) — poll a handful of
-      // times rather than checking once, and stop as soon as we see a newer
-      // last-attempt timestamp than what was there before this click.
-      for (const delayMs of [3000, 6000, 10000, 15000, 20000]) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        const lastAttemptAt = await loadLockStatus();
-        if (lastAttemptAt && lastAttemptAt !== baseline) break;
-      }
-    } catch (err) {
-      setReconnectStatus("error");
-      setReconnectError(err instanceof Error ? err.message : "Request failed.");
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      {/* Always-visible: when the last login attempt (success or failure) happened */}
-      {lock?.lastAttemptAt && (
-        <div className="text-xs text-muted">
-          Last login attempt: <span className="text-text">{formatRelativeTime(lock.lastAttemptAt, nowMs)}</span>{" "}
-          <span className="text-muted">
-            ({new Date(lock.lastAttemptAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })})
-          </span>
-        </div>
-      )}
-
-      {/* Interpreted result of the most recent attempt, if it failed */}
-      {lock?.lastErrorType === "rate_limited" && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-          <strong>Robinhood rejected this login (HTTP 429 — too many requests).</strong> This is
-          Robinhood's own rate limit on their servers, not something on our end, and retrying sooner
-          is likely to extend it rather than clear it. Best move is to stop attempting for a
-          while — hours, not minutes — before trying again.
-        </div>
-      )}
-      {lock?.lastErrorType === "auth_failed" && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-          <strong>Robinhood rejected the login itself</strong> (invalid credentials or a failed
-          verification step) — worth double-checking the username/password saved below.
-        </div>
-      )}
-      {lock?.lastErrorType === "unknown" && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-          <strong>The last login attempt failed</strong> for a reason that isn't one of the
-          recognized cases (rate limit or bad credentials) — worth checking the pm2 logs for the
-          full detail.
-        </div>
-      )}
-
-      {/* Lockout status banner */}
-      {lock?.manualRequired && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          Automatic login retries are paused after {lock.consecutiveFailures} consecutive failures —
-          this won't retry on its own anymore. Tap <strong>Reconnect Robinhood</strong> below whenever
-          you're ready to try again; manual attempts always go through immediately.
-        </div>
-      )}
-      {lock?.locked && !lock.manualRequired && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          Automatic retries are paused after {lock.consecutiveFailures} consecutive failure
-          {lock.consecutiveFailures === 1 ? "" : "s"} — this protects against repeating the earlier
-          rate-limit lockout. It'll allow another automatic attempt at{" "}
-          {lock.lockedUntil
-            ? new Date(lock.lockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" })
-            : "—"}
-          {" "}— or tap <strong>Reconnect Robinhood</strong> below to try again right now.
-        </div>
-      )}
-
-      {/* Credentials */}
-      <form onSubmit={saveCredentials}>
-        <p className="text-xs text-muted">
-          Saved only to <code className="text-[10px]">databridge/.env</code> (gitignored, file permissions
-          locked to owner-only) — never committed, never sent anywhere else.
-        </p>
-        <div className="mt-3 space-y-3">
-          <div>
-            <label className={labelClass()} htmlFor="rh-username">Username / email</label>
-            <input
-              id="rh-username"
-              type="text"
-              autoComplete="username"
-              className={inputClass()}
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </div>
-          <div>
-            <label className={labelClass()} htmlFor="rh-password">Password</label>
-            <input
-              id="rh-password"
-              type="password"
-              autoComplete="current-password"
-              className={inputClass()}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={configured ? "•••••••• (saved — enter to replace)" : "Enter password"}
-            />
-          </div>
-        </div>
-        <div className="mt-3 flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={credStatus === "saving"}
-            className="rounded-full bg-emerald-500/15 px-4 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30 active:bg-emerald-500/25 disabled:opacity-60"
-          >
-            {credStatus === "saving" ? "Saving…" : "Save credentials"}
-          </button>
-          {credStatus === "saved" && <span className="text-xs text-emerald-400">Saved.</span>}
-          {credStatus === "error" && <span className="text-xs text-rose-400">{credError}</span>}
-          {configured === true && credStatus === "idle" && (
-            <span className="text-xs text-muted">Currently configured for {username}.</span>
-          )}
-        </div>
-      </form>
-
-      <div className="border-t border-border pt-4">
-        <p className="text-xs text-muted">
-          Makes exactly one login attempt right now. If your existing session is still valid this
-          succeeds instantly with no prompt; if not, Robinhood may send a device-approval push to
-          your phone as part of this same attempt — have it ready before tapping. This does not
-          retry on its own, so avoid pressing it repeatedly in a row if it fails; that's what can
-          extend a Robinhood-side rate limit rather than clear it.
-        </p>
-
-        <div className="mt-3 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={reconnect}
-            disabled={reconnectStatus === "requesting"}
-            className="rounded-full bg-emerald-500/15 px-4 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30 active:bg-emerald-500/25 disabled:opacity-60"
-          >
-            {reconnectStatus === "requesting" ? "Requesting…" : "Reconnect Robinhood"}
-          </button>
-          {reconnectStatus === "requested" && (
-            <span className="text-xs text-emerald-400">Requested — check your phone for a new approval prompt.</span>
-          )}
-          {reconnectStatus === "error" && <span className="text-xs text-rose-400">{reconnectError}</span>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// App update (git pull + pm2 restart)
-// ---------------------------------------------------------------------------
-
-function GitUpdateSection() {
-  const [status, setStatus] = useState<"idle" | "requesting" | "restarting" | "done" | "error">("idle");
-  const [log, setLog] = useState("");
-  const [error, setError] = useState("");
-
-  async function pollLog(): Promise<string> {
-    const res = await fetch("/api/git-update");
-    const data = await res.json();
-    return (data.log as string) ?? "";
-  }
-
-  async function triggerUpdate() {
-    setStatus("requesting");
-    setError("");
-    setLog("");
-    try {
-      const res = await fetch("/api/git-update", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Request failed.");
-      setStatus("restarting");
-    } catch (err) {
+      if (!res.ok || data.error) throw new Error(data.error || "Save failed.");
+      setStatus("saved");
+      setTimeout(() => setStatus("idle"), 2000);
+    } catch {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Request failed.");
-      return;
     }
-
-    // From here on, `appfiles` itself may get killed and replaced by pm2
-    // mid-poll - a failed fetch during that window just means "still
-    // restarting," not a real error, so keep retrying rather than bailing
-    // on the first connection refusal. npm install + a Next.js build on a
-    // Pi can take several minutes, so give this up to ~10 minutes total,
-    // not just long enough for a plain restart.
-    for (let i = 0; i < 150; i++) {
-      await new Promise((r) => setTimeout(r, 4000));
-      try {
-        const text = await pollLog();
-        setLog(text);
-        if (/finished, exit code|Done\.$/.test(text.trim())) {
-          setStatus(/finished, exit code 0|Done\.$/.test(text.trim()) ? "done" : "error");
-          if (!/Done\.$/.test(text.trim())) {
-            setError("git pull or pm2 restart failed - see log below.");
-          }
-          return;
-        }
-      } catch {
-        // Still restarting (or briefly unreachable) - keep polling.
-      }
-    }
-    setStatus("error");
-    setError("Timed out waiting for the update to finish (10 min) - check the log below or pm2 logs directly.");
   }
 
   return (
-    <div className="space-y-3">
+    <div>
       <p className="text-xs text-muted">
-        Runs <code className="text-[10px]">git pull</code>, then <code className="text-[10px]">npm install</code>{" "}
-        and <code className="text-[10px]">npm run build</code> (a plain restart alone would just re-serve the
-        old build), then restarts every pm2 process including this app itself. Can take a few minutes on a
-        Pi - the page may stop responding briefly while <code className="text-[10px]">appfiles</code> restarts
-        at the end; that&apos;s expected, not a failure.
+        The after-hours Simulate what-if assumes IV moves this many vol points per 1% underlying move
+        (down {"→"} IV up), tapering for longer-dated legs. 0 = spot-only {"Δ"}/{"Γ"}, no
+        vol term. Saved to your data and used everywhere Simulate is turned on.
       </p>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={triggerUpdate}
-          disabled={status === "requesting" || status === "restarting"}
-          className="rounded-full bg-emerald-500/15 px-4 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30 active:bg-emerald-500/25 disabled:opacity-60"
-        >
-          {status === "requesting" || status === "restarting" ? "Updating…" : "Update from GitHub"}
-        </button>
-        {status === "done" && <span className="text-xs text-emerald-400">Updated and restarted.</span>}
-        {status === "error" && <span className="text-xs text-rose-400">{error}</span>}
+      <div className="mt-4 flex items-center gap-3">
+        <div className="inline-flex items-center gap-0.5 rounded-lg bg-amber-500/15 py-1 pl-0.5 pr-1 text-sm font-medium text-amber-100/90 ring-1 ring-inset ring-amber-500/40">
+          <button
+            onClick={() => change(skew - STEP)}
+            className="px-2 leading-none text-amber-200/70 active:text-amber-100"
+            aria-label="Lower IV skew"
+          >
+            {"−"}
+          </button>
+          <span className="tabular-nums whitespace-nowrap px-1">
+            {skew === 0 ? "IV off" : "skew " + skew.toFixed(1)}
+          </span>
+          <button
+            onClick={() => change(skew + STEP)}
+            className="px-2 leading-none text-amber-200/70 active:text-amber-100"
+            aria-label="Raise IV skew"
+          >
+            +
+          </button>
+        </div>
+        {status === "saving" && <span className="text-xs text-muted">Saving…</span>}
+        {status === "saved" && <span className="text-xs text-emerald-400">Saved.</span>}
+        {status === "error" && <span className="text-xs text-rose-400">Save failed.</span>}
       </div>
-
-      {log && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-surface-2 p-2 text-[11px] text-muted">
-          {log}
-        </pre>
-      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Top-level menu
-// ---------------------------------------------------------------------------
-
-export function SettingsForm({ initialIntervals }: { initialIntervals: Intervals }) {
+export function SettingsForm({
+  initialIntervals,
+  initialSkew,
+  bridges = [{ id: "primary", label: "Schwab" }],
+  accounts = [],
+  combineIds = [],
+  combinedSelected = false,
+  manual = [],
+}: {
+  initialIntervals: Intervals;
+  initialSkew: number;
+  bridges?: { id: string; label: string }[];
+  manual?: ManualAccount[];
+  accounts?: CombineAccountOption[];
+  combineIds?: string[];
+  combinedSelected?: boolean;
+}) {
+  const multi = bridges.length > 1;
   return (
     <div className="space-y-3">
+      {bridges.map((b, i) => (
+        <MenuItem
+          key={b.id}
+          title={multi ? `${b.label} — Schwab connection` : "Schwab connection"}
+          subtitle={multi ? "Set up or reconnect this login" : "Set up or reconnect your account"}
+          defaultOpen={i === 0}
+        >
+          <SchwabConnect bridge={b.id} />
+        </MenuItem>
+      ))}
+      <MenuItem
+        title="Combine views"
+        subtitle={
+          combineIds.length > 0
+            ? `Combined View is on · ${combineIds.length} of ${accounts.length} accounts`
+            : "Merge accounts into one Combined View"
+        }
+      >
+        <CombineViews accounts={accounts} initialIds={combineIds} combinedSelected={combinedSelected} />
+      </MenuItem>
       <MenuItem title="Refresh intervals" subtitle="How often each data source updates">
         <IntervalsSection initialIntervals={initialIntervals} />
       </MenuItem>
-      <MenuItem title="Robinhood connection" subtitle="Credentials, login status, and reconnect">
-        <RobinhoodSection />
+      <MenuItem title="Simulate skew" subtitle="After-hours what-if IV assumption">
+        <SkewSection initialSkew={initialSkew} />
       </MenuItem>
-      <MenuItem title="App update" subtitle="Pull latest code from GitHub and restart">
-        <GitUpdateSection />
+      <MenuItem title="Manual positions" subtitle="Track positions held elsewhere, priced by Schwab">
+        <ManualPositions initial={manual} />
       </MenuItem>
+      <MenuItem title="Layout" subtitle="Phone frame or the wide tablet canvas">
+        <p className="mb-2 text-xs text-muted">
+          Auto picks the tablet layout on screens 900px and wider (an iPad in landscape, any laptop or monitor)
+          and the phone layout otherwise. The canvas never grows past about an iPad, so a big monitor just gets
+          more room around it.
+        </p>
+        <LayoutToggle />
+      </MenuItem>
+      <LinkItem
+        title="Contribute to development"
+        subtitle="Optional. Chip in on Venmo to support ongoing work."
+        href={CONTRIBUTE_URL}
+      />
     </div>
   );
 }

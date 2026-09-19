@@ -2,10 +2,12 @@
 // file fetch_earnings.py writes. Used to flag CSPs that span an earnings report.
 import fs from "node:fs";
 import path from "node:path";
+import { exampleEarnings } from "./example-earnings";
 
 export const EARNINGS_PATH = path.join(process.cwd(), "data", "earnings.json");
 
-export function getEarnings(): Record<string, string> {
+export function getEarnings(example = false): Record<string, string> {
+  if (example) return exampleEarnings;
   try {
     const raw = fs.readFileSync(EARNINGS_PATH, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;

@@ -5,6 +5,7 @@
 // two legs into one complete vertical (SpreadGroupCard) with net stats. Closed
 // round-trips render via ClosedStrategy. Mirrors the CSP/LEAP experience.
 import { useState } from "react";
+import { usePersistentState } from "@/lib/view-state";
 import Link from "next/link";
 import { Card, Stat } from "@/components/ui";
 import { Amt } from "@/components/privacy";
@@ -12,19 +13,24 @@ import { OpenGroupCard } from "@/components/OpenGroupCard";
 import { SpreadGroupCard } from "@/components/SpreadGroupCard";
 import { ClosedStrategy } from "@/components/ClosedStrategy";
 import { fmtMoney, fmtPct, optionBasis, optionPnl } from "@/lib/calc";
-import { buildSpreads, spreadInsight, type Spread, type SpreadAction } from "@/lib/spread";
+import { CSP_DEFAULT_DIR, nextSort, sortCsps, type Sort, type SortDir } from "@/lib/option-sort";
+import { buildSpreads, type Spread } from "@/lib/spread";
 import type { ClosedCoveredCall, ClosedSpread, OptionPosition } from "@/lib/types";
+import { SimulateControls } from "@/components/SimulateControls";
+import { useIvSkew } from "@/lib/simConfig";
+import { simulatePosition, hasSimulatableMove } from "@/lib/simulate";
+import { SimValue } from "@/components/SimValue";
 
 type Status = "open" | "closed";
-type SortDir = "asc" | "desc";
-type Sort = { key: string; dir: SortDir };
 
 const SPREAD_DEFAULT_DIR: Record<string, SortDir> = {
   ticker: "asc", dte: "asc", risk: "desc", plpct: "desc", pldollar: "desc", tostrike: "asc", yr: "desc",
+  bb: "asc",
 };
 function spreadSortVal(sp: Spread, key: string): number | string {
   switch (key) {
     case "ticker": return sp.symbol;
+    case "bb": return sp.short.bbSigma ?? Infinity;
     case "dte": return sp.dte;
     case "risk": return sp.collateral;
     case "plpct": return sp.pnlPct;
@@ -46,45 +52,46 @@ function sortSpreads(items: Spread[], sort: Sort): Spread[] {
   });
 }
 
-const SPREAD_FILTERS: { key: SpreadAction; label: string; active: string; idle: string; dot: string }[] = [
-  {
-    key: "manage",
-    label: "Manage",
-    active: "bg-emerald-500/25 text-emerald-100 ring-emerald-500/50",
-    idle: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30 active:bg-emerald-500/20",
-    dot: "bg-emerald-500",
-  },
-  {
-    key: "hold",
-    label: "Hold",
-    active: "bg-sky-500/25 text-sky-100 ring-sky-500/50",
-    idle: "bg-surface-2 text-muted ring-border active:bg-surface-2/70",
-    dot: "bg-sky-500",
-  },
-];
-
 export function StrategyTypeView({
   type,
-  open,
+  open: rawOpen,
   closedCovered,
   closedSpreads,
   initialStatus = "open",
+  statusFromUrl = false,
   closedMode,
   closedMonths,
+  costBasisBySymbol,
 }: {
   type: "covered" | "spread";
   open: OptionPosition[];
   closedCovered: ClosedCoveredCall[];
   closedSpreads: ClosedSpread[];
   initialStatus?: Status;
+  statusFromUrl?: boolean; // true when ?view= set it — then it wins over persisted
   closedMode?: "all" | "ytd" | "months" | "today";
   closedMonths?: number;
+  // Underlying average cost per share, keyed by uppercase symbol — supplied by
+  // the covered-call page so a strike under the basis can carry a BC tag.
+  costBasisBySymbol?: Record<string, number>;
 }) {
-  const [status, setStatus] = useState<Status>(initialStatus);
-  const [sort, setSort] = useState<Sort>({ key: "yr", dir: "asc" });
-  const [spreadFilter, setSpreadFilter] = useState<SpreadAction | null>(null);
+  const [status, setStatus] = usePersistentState<Status>("strategy-status", initialStatus, statusFromUrl);
+  const [sort, setSort] = usePersistentState<Sort>("strategy-sort", { key: "yr", dir: "asc" });
+  // Covered calls render the CSP column set, so they sort by the CSP keys;
+  // spreads sort per-vertical on their own keys (risk instead of collateral).
   const onSort = (key: string) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: SPREAD_DEFAULT_DIR[key] ?? "asc" }));
+    setSort((s) => nextSort(s, key, type === "covered" ? CSP_DEFAULT_DIR : SPREAD_DEFAULT_DIR));
+
+  // After-hours Simulate: re-price open legs from the live underlying. Spreads rebuild
+  // from these legs (buildSpreads below), so the whole view follows.
+  const [sim, setSim] = useState(false);
+  const [ivSkew] = useIvSkew();
+  const canSim = hasSimulatableMove(rawOpen);
+  const open = sim && canSim ? rawOpen.map((o) => simulatePosition(o, { ivSkew })) : rawOpen;
+  const simToggle =
+    rawOpen.length > 0 ? (
+      <SimulateControls on={sim && canSim} onToggle={() => setSim((v) => !v)} disabled={!canSim} />
+    ) : undefined;
 
   const noun = type === "covered" ? "covered call" : "spread";
   const closedCount = type === "covered" ? closedCovered.length : closedSpreads.length;
@@ -92,32 +99,27 @@ export function StrategyTypeView({
   // Covered-call aggregates (per leg).
   const premium = open.reduce((s, o) => s + optionBasis(o), 0);
   const pnl = open.reduce((s, o) => s + optionPnl(o), 0);
+  const rawPnl = rawOpen.reduce((s, o) => s + optionPnl(o), 0); // pre-sim, for before/after
+  const rawById = new Map(rawOpen.map((o) => [o.id, o])); // pre-sim legs by id, for row before/after
 
-  // Spread aggregates (per complete vertical). The Manage/Hold filter narrows the
-  // whole view — chips, stats and list alike — exactly like the CSP filter bar.
+  // Spread aggregates (per complete vertical). Action filtering removed — all open
+  // verticals show; sorting still applies.
   const { spreads, orphans } = type === "spread" ? buildSpreads(open) : { spreads: [], orphans: [] };
-  const spreadCounts = spreads.reduce(
-    (acc, sp) => {
-      acc[spreadInsight(sp).action] += 1;
-      return acc;
-    },
-    { manage: 0, hold: 0 } as Record<SpreadAction, number>,
-  );
-  const effectiveSpreads = spreadFilter ? spreads.filter((sp) => spreadInsight(sp).action === spreadFilter) : spreads;
+  const effectiveSpreads = spreads;
   const sortedSpreads = sortSpreads(effectiveSpreads, sort);
   const sCredit = effectiveSpreads.reduce((s, x) => s + x.maxProfit, 0);
   const sRisk = effectiveSpreads.reduce((s, x) => s + x.collateral, 0);
   const sPnl = effectiveSpreads.reduce((s, x) => s + x.pnl, 0);
+  // Pre-sim spread P/L for the shown verticals (matched by id), for before/after.
+  const rawSpreadById = new Map(
+    (type === "spread" ? buildSpreads(rawOpen).spreads : []).map((s) => [s.id, s]),
+  );
+  const sPnlReal = effectiveSpreads.reduce((s, sp) => s + (rawSpreadById.get(sp.id) ?? sp).pnl, 0);
   const sOpeningYield = sRisk > 0 ? sCredit / sRisk : 0;
   // Collateral-weighted DTE, same convention as the CSP view.
   const sWeightedDte = sRisk > 0 ? effectiveSpreads.reduce((s, x) => s + Math.max(x.dte, 0) * x.collateral, 0) / sRisk : 0;
   const sOpeningAnn = sWeightedDte > 0 ? sOpeningYield * (360 / sWeightedDte) : 0;
-  const spreadEmpty =
-    spreadFilter === "manage"
-      ? "No spreads hitting the 50% / 21-DTE trigger."
-      : spreadFilter === "hold"
-        ? "No spreads in the hold bucket."
-        : "No open spreads.";
+  const spreadEmpty = "No open spreads.";
 
   return (
     <div>
@@ -147,25 +149,31 @@ export function StrategyTypeView({
           <>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Stat label="Premium value" value={<Amt>{fmtMoney(premium)}</Amt>} sub="collected" />
-              <Stat
-                label="Gain/Loss"
-                value={<Amt>{`${pnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(pnl))}`}</Amt>}
-                tone={pnl >= 0 ? "pos" : "neg"}
-                sub="unrealized"
-              />
+              <Stat label="Gain/Loss" value={<SimValue oldV={rawPnl} newV={pnl} signed />} sub="unrealized" />
             </div>
-            <OpenGroupCard title="Covered Calls" note="short calls against stock" items={open} variant="csp" />
+            {sim && canSim && (
+              <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
+                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Schwab close values.
+              </p>
+            )}
+            <OpenGroupCard
+              title="Covered Calls"
+              note="short calls against stock · tap a column header to sort"
+              items={sortCsps(open, sort)}
+              variant="csp"
+              action={simToggle}
+              sort={sort}
+              onSort={onSort}
+              realById={rawById}
+              sim={sim && canSim}
+              costBasisBySymbol={costBasisBySymbol}
+            />
           </>
         ) : (
           <>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Stat label="Net credit" value={<Amt>{fmtMoney(sCredit)}</Amt>} sub={`${effectiveSpreads.length} spread${effectiveSpreads.length === 1 ? "" : "s"}`} />
-              <Stat
-                label="Gain/Loss"
-                value={<Amt>{`${sPnl >= 0 ? "+" : "−"}${fmtMoney(Math.abs(sPnl))}`}</Amt>}
-                tone={sPnl >= 0 ? "pos" : "neg"}
-                sub="unrealized"
-              />
+              <Stat label="Gain/Loss" value={<SimValue oldV={sPnlReal} newV={sPnl} signed />} sub="unrealized" />
               <Stat label="Risk" value={<Amt>{fmtMoney(sRisk)}</Amt>} sub="max loss" />
               <Stat
                 label="Opening yield"
@@ -174,25 +182,12 @@ export function StrategyTypeView({
                 sub={`${fmtPct(sOpeningAnn, 0)} annualized`}
               />
             </div>
-            {spreads.length > 0 && (
-              <div className="mt-3 flex gap-1.5">
-                {SPREAD_FILTERS.map((f) => {
-                  const on = spreadFilter === f.key;
-                  return (
-                    <button
-                      key={f.key}
-                      onClick={() => setSpreadFilter(on ? null : f.key)}
-                      className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium ring-1 ring-inset transition-colors ${on ? f.active : f.idle}`}
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />
-                      {f.label} · {spreadCounts[f.key]}
-                      {on ? <span className="opacity-80">✕</span> : null}
-                    </button>
-                  );
-                })}
-              </div>
+            {sim && canSim && (
+              <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
+                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Schwab close values.
+              </p>
             )}
-            <SpreadGroupCard title="Vertical Spreads" note="tap a column header to sort" spreads={sortedSpreads} emptyLabel={spreadEmpty} sort={sort} onSort={onSort} />
+            <SpreadGroupCard title="Vertical Spreads" note="tap a column header to sort" spreads={sortedSpreads} emptyLabel={spreadEmpty} sort={sort} onSort={onSort} action={simToggle} realById={rawSpreadById} sim={sim && canSim} />
             {orphans.length > 0 && (
               <OpenGroupCard title="Unpaired legs" note="couldn't match into a spread" items={orphans} variant="long" />
             )}
