@@ -1,11 +1,11 @@
 // Domain models for the portfolio app.
-// NOTE: Data currently comes from a static seed (lib/data.ts) captured from the
-// live Robinhood MCP connector. The shapes below are the contract the UI relies
-// on, so the seed can later be swapped for a real backend without UI changes.
+// Data is loaded from data/*.json (written by the data bridge) at runtime, with a
+// built-in example dataset as a fallback. The shapes below are the contract the UI
+// relies on, independent of where the data comes from.
 
 export interface Account {
   id: string;
-  mask: string; // last-4 masked id, e.g. "••••5433"
+  mask: string; // last-4 masked id, e.g. "••••0000"
   type: string; // "margin" | "cash"
   brokerageType: string; // "individual"
   nickname?: string;
@@ -19,7 +19,7 @@ export interface PortfolioSummary {
   cryptoValue: number;
   cash: number;
   buyingPower: number;
-  optionsBuyingPower?: number; // Schwab options buying power (deployable, net of collateral)
+  optionsBuyingPower?: number; // options buying power (deployable, net of collateral)
   marginLimit?: number; // Robinhood: total margin approved for this account (the ceiling)
   marginUsed?: number; // Robinhood: portion of marginLimit currently drawn (limit - unused)
   optionsCollateral?: number; // Robinhood: cash currently held against short options positions
@@ -68,7 +68,7 @@ export interface CryptoHolding {
   price: number; // latest price per unit
 }
 
-// Extended to carry every category the Schwab bridge (export_to_app.py)
+// Extended to carry every category the bridge (export_to_app.py)
 // classifies. The original three (csp / leap-call / leap-put-hedge) still drive
 // the CSP and LEAPS tabs; the rest flow through the data so nothing is dropped
 // and get their own surfaces incrementally.
@@ -93,12 +93,17 @@ export interface OptionPosition {
   entryPerShare: number; // premium per share at entry (cost basis); positive magnitude
   mark: number; // current mark per share
   delta: number;
+  gamma?: number | null; // dΔ/dS (long-option convention), for the Simulate projection
+  vega?: number | null; // dV/dσ per vol-point (long-option convention), for the Simulate IV-shift term
   theta: number;
   iv: number; // implied volatility (decimal, e.g. 0.61)
   breakeven: number;
   underlyingPrice?: number; // current price of the underlying (for "to strike")
   underlyingChange?: number | null; // underlying per-share $ move today (Top Movers)
+  underlyingClose?: number | null; // regular-session close — Simulate reference price
+  underlyingLive?: number | null; // current/after-hours last — Simulate target price
   dayValueChange?: number | null; // this leg's signed $ value move today (Top Movers)
+  bbSigma?: number | null; // strike's σ from the underlying's 20-day mean (−2 = lower BB)
   chanceOfProfitShort?: number; // 0..1, for short positions
   openedAt?: string; // ISO date the position was opened (held positions only)
   erDate?: string | null; // next earnings date (ISO) for the underlying, if known
@@ -122,7 +127,7 @@ export interface ResearchIdea {
 /**
  * A screened cash-secured-put candidate. Raw inputs only — the composite score
  * is computed at render time by lib/csp-model.ts so the breakdown is always
- * visible. Fields the Robinhood connector can't supply (IV Rank, technicals,
+ * visible. Fields the data bridge can't supply (IV Rank, technicals,
  * event calendar) are nullable and the score renormalizes over what's present.
  */
 export interface CSPCandidate {
@@ -176,6 +181,7 @@ export interface CSPCandidatesFile {
 // A closed cash-secured-put round-trip (reconstructed from option order history).
 export interface ClosedCSP {
   id: string;
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   strike: number;
@@ -187,7 +193,7 @@ export interface ClosedCSP {
   creditReceived: number; // $ credit at open
   costToClose: number; // $ debit to buy-to-close (0 if expired)
   realizedPnl: number; // $
-  outcome: "closed_profit" | "closed_loss" | "expired";
+  outcome: "closed_profit" | "closed_loss" | "expired" | "assigned";
   daysHeld: number;
   collateral: number;
   returnOnCollateral: number; // decimal
@@ -202,6 +208,7 @@ export interface ClosedCSPFile {
 // A closed long-LEAP round-trip (reconstructed from option order history).
 export interface ClosedLeap {
   id: string;
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   optionType: "call" | "put";
@@ -228,6 +235,7 @@ export interface ClosedLeapFile {
 // A closed covered-call round-trip (short call written against stock).
 export interface ClosedCoveredCall {
   id: string;
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   strike: number;
@@ -239,7 +247,7 @@ export interface ClosedCoveredCall {
   creditReceived: number; // $ collected at open
   costToClose: number; // $ to buy-to-close (0 if expired)
   realizedPnl: number;
-  outcome: "closed_profit" | "closed_loss" | "expired";
+  outcome: "closed_profit" | "closed_loss" | "expired" | "assigned"; // assigned = called away; premium folded into the shares' sale proceeds, no option gain booked
   daysHeld: number;
   returnOnNotional: number; // realizedPnl ÷ (strike × 100 × contracts), decimal
   annualized: number; // decimal
@@ -253,6 +261,7 @@ export interface ClosedCoveredFile {
 // A closed vertical-spread round-trip (short + long leg, same expiration).
 export interface ClosedSpread {
   id: string;
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   optionType: "call" | "put";
@@ -283,6 +292,7 @@ export interface ClosedSpreadFile {
 // A closed stock round-trip (FIFO buys→sells, or short cover).
 export interface ClosedStock {
   id: string;
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   side: "long" | "short";
@@ -319,7 +329,7 @@ export interface AccountData {
   options: OptionPosition[];
   valueHistory: ValuePoint[];
   /**
-   * Per-coin crypto holdings. Optional: the Robinhood MCP connector exposes no
+   * Per-coin crypto holdings. Optional: the data bridge exposes no
    * crypto-positions read tool, so this is absent unless seeded by hand. When
    * absent, the UI falls back to summary.cryptoValue (aggregate only).
    */
@@ -327,9 +337,8 @@ export interface AccountData {
 }
 
 /**
- * The live, refreshable market data the UI renders. Produced by Claude Code via
- * the Robinhood MCP connector and written to data/snapshot.json. Research ideas
- * are app content (not market data) and stay in lib/data.ts.
+ * The live, refreshable market data the UI renders. Produced by the data bridge
+ * and written to data/snapshot.json.
  *
  * `data` is keyed by account id (see `accounts[].id`).
  */
@@ -337,4 +346,48 @@ export interface Snapshot {
   meta: SnapshotMeta;
   accounts: Account[];
   data: Record<string, AccountData>;
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio risk — sector concentration.
+// The ticker → sector map comes from data/sectors.json (bridge: sectors.py, via
+// Yahoo Finance — Schwab's API carries no sector). The buckets are computed in
+// the app from the snapshot (lib/portfolio-risk.ts); the cap travels inside the
+// result so the UI reads the threshold and the values from the same object.
+// ---------------------------------------------------------------------------
+export interface SectorEntry {
+  sector: string | null; // null = Yahoo had no classification for this ticker
+  industry?: string | null;
+  quoteType?: string; // "EQUITY" | "ETF" | ...
+  asof?: string; // ISO — when this ticker was last looked up
+}
+
+export interface SectorsFile {
+  asof?: string | null;
+  tickers: Record<string, SectorEntry>;
+  /** Hand corrections, ticker → sector label. Applied over `tickers` by the app. */
+  overrides?: Record<string, string>;
+}
+
+/** Upper-cased ticker → sector label, after overrides. */
+export type SectorMap = Record<string, string>;
+
+export interface RiskRules {
+  sector: { maxAllocationPct: number }; // max share of portfolio value in one sector
+}
+
+export interface SectorBucket {
+  sector: string;
+  value: number; // capital in this sector: stock value + CSP collateral + LEAP/spread capital
+  pct: number; // 0..1, share of portfolioValue
+  over: boolean; // pct > rules.sector.maxAllocationPct
+  unclassified: boolean; // the "no sector known" bucket
+  tickers: { symbol: string; value: number }[]; // sorted by value, for the drill-in line
+}
+
+export interface PortfolioRisk {
+  portfolioValue: number; // every account across every bridge — what each bucket's pct is a share of
+  accountCount: number;
+  sectors: SectorBucket[]; // sorted by value, desc
+  rules: RiskRules;
 }

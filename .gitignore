@@ -36,3 +36,15 @@ appfiles/data/*.json
 .DS_Store
 *.log
 export_log.txt
+
+# ===== Bridge state written by the dashboard / the bridge itself =====
+credentials.env
+credentials.env.*
+reauth_inbox/
+task_inbox/
+bridge-state/
+
+# Real account data, including the manual/ subfolder
+appfiles/data/*
+!appfiles/data/.gitkeep
+!appfiles/data/README.md

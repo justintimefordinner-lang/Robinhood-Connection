@@ -2,20 +2,24 @@ import Link from "next/link";
 import { Card, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { Donut } from "@/components/charts";
 import { HoldingsTable } from "@/components/HoldingsTable";
-import { HomeHero } from "@/components/HomeHero";
 import { TopMovers } from "@/components/TopMovers";
+import { HomeHeroSim } from "@/components/HomeHeroSim";
 import type { DonutSlice } from "@/components/charts";
 import { Amt, HideButton } from "@/components/privacy";
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { PortfolioFit } from "@/components/PortfolioFit";
+import { BuyingPowerStat } from "@/components/BuyingPowerStat";
 import { AvailableCash } from "@/components/AvailableCash";
 import { getSnapshot } from "@/lib/snapshot";
 import { getAmReport } from "@/lib/am-report";
-import { getBtcQuote, fmtBtc } from "@/lib/btc-data";
 import { computeHoldings } from "@/lib/holdings";
 import { dailyThetaBreakdown } from "@/lib/theta";
+import { getSectorMap } from "@/lib/sectors";
+import { computePortfolioRisk } from "@/lib/portfolio-risk";
 import { getSelectedAccount } from "@/lib/account";
 import { getVixSnapshot } from "@/lib/vix-data";
+import { getBtcQuote, fmtBtc } from "@/lib/btc-data";
+import { isRegularSession } from "@/lib/market-hours";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
 import { assessVix, REGIME_COLORS } from "@/lib/vix";
@@ -24,6 +28,7 @@ import {
   equityPnl,
   equityValue,
   fmtMoney,
+  freeCashValue,
   isCashEquivalent,
   isCashSettledIndex,
   optionMarketValue,
@@ -33,19 +38,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// Compact data timestamp: "2026-06-17 23:29 Mountain Daylight Time" → "06/17/26 11:29 PM MDT".
+// Compact data timestamp: "2026-06-17 23:29 Mountain Daylight Time" → "06/17/26 23:29".
 function fmtDataStamp(pricesAsOf: string): string {
-  const m = pricesAsOf.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?:\s+(.+))?$/);
+  const m = pricesAsOf.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
   if (!m) return pricesAsOf;
-  const [, y, mo, d, hh, mm, tzRaw] = m;
-  let hour = parseInt(hh, 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  // Backend sends the full zone name (e.g. "Mountain Daylight Time"); abbreviate
-  // multi-word names to initials ("MDT") and leave already-short ones (e.g. "UTC") as-is.
-  const words = tzRaw?.trim().split(/\s+/) ?? [];
-  const tz = words.length > 1 ? words.map((w) => w[0]).join("") : words[0] ?? "";
-  return `${mo}/${d}/${y.slice(2)} ${hour}:${mm} ${ampm}${tz ? ` ${tz}` : ""}`;
+  const [, y, mo, d, hm] = m;
+  return `${mo}/${d}/${y.slice(2)} ${hm}`;
 }
 
 export default async function HomePage() {
@@ -54,10 +52,17 @@ export default async function HomePage() {
   const { id, data } = await getSelectedAccount(snap);
   const { summary, equities, options, valueHistory } = data;
 
-  const vixSnap = getVixSnapshot();
+  // Whole-portfolio risk (every account) for the quick-access card's one-line read:
+  // the heaviest sector and whether it breaches the cap.
+  const risk = computePortfolioRisk(snap, await getSectorMap());
+  const topSector = risk.sectors[0];
+  const sectorsOver = risk.sectors.filter((s) => s.over).length;
+
+  const example = meta.source === "example";
+  const vixSnap = getVixSnapshot(example);
   const vix = vixSnap ? assessVix(vixSnap) : null;
-  // Latest BTC spot for the header stat stack. Null (offline / slow) just drops
-  // the line — see lib/btc-data.ts.
+  // Latest BTC spot for the header stat stack. Null (offline / slow / example off)
+  // just drops the line — see lib/btc-data.ts.
   const btc = await getBtcQuote();
 
   // Allocation by capital deployed — break "Options" into its strategies. LEAP &
@@ -70,26 +75,24 @@ export default async function HomePage() {
     .reduce((s, o) => s + cspCollateral(o), 0);
   const cspCount = options.filter((o) => o.kind === "csp" && !isCashSettledIndex(o.symbol)).length;
   const spreadRisk = spreadRiskCapital(options);
+  const theta = dailyThetaBreakdown(options);
   // Capital deployed in options strategies: long LEAP/hedge value + CSP collateral
   // + spread defined risk. (Distinct from summary.optionsValue, the net mark.)
   const optionsCapital = leapCallsValue + hedgeValue + cspCollateralValue + spreadRisk;
-  // Daily theta across the whole options book, split credit (premium collected)
-  // vs debit (premium paid) — replaces the old aggregate Crypto tile.
-  const theta = dailyThetaBreakdown(options);
-  const freeCash = Math.max(
-    0,
-    summary.totalValue - summary.equityValue - leapCallsValue - hedgeValue - cspCollateralValue - spreadRisk - summary.cryptoValue,
-  );
+  // Leverage tracker: total positional value (Stocks market value + Options capital) vs
+  // the account's liquid value. The gap is financed by margin. % is margin ÷ liquid value
+  // — orange above 20%, red at 28%+, keeping under a 30% self-imposed ceiling.
+  const totalExposure = summary.equityValue + optionsCapital;
+  const marginUsed = Math.max(0, totalExposure - summary.totalValue);
   // Money-market / sweep funds (e.g. SWGXX) report as equity positions but are
   // really cash. Pull them out of Stocks and into the Cash slice.
   const moneyMarketValue = equities
     .filter((e) => isCashEquivalent(e.symbol))
     .reduce((s, e) => s + equityValue(e), 0);
   const stocksValue = Math.max(0, summary.equityValue - moneyMarketValue);
-  const cashValue = freeCash + moneyMarketValue;
-  // Liquid cash including money-market/sweep funds (e.g. SWGXX), fed to the fit so
-  // "Available" reflects all liquid cash, not just the brokerage cash line.
-  const liquidCash = summary.cash + moneyMarketValue;
+  // Genuine free cash — one figure shared by the Cash pie slice and the VIX
+  // reserve math (PortfolioFit / AvailableCash) so they can't disagree.
+  const cashValue = freeCashValue(summary, equities, options);
   const allocation: DonutSlice[] = [
     { label: "Stocks", value: stocksValue, color: "#34d399" },
     { label: "LEAPs", value: leapCallsValue, color: "#a78bfa" },
@@ -104,31 +107,17 @@ export default async function HomePage() {
     (label === "Stocks" && pct > 0.25) || (label === "LEAPs" && pct > 0.15) || (label === "CSPs" && pct < 0.55);
 
   // Holdings-by-ticker table: capital per ticker across EVERY strategy — stock
-  // value + CSP collateral + LEAP/hedge market value + spread defined risk. (Covered
-  // calls add nothing; the shares are already in stock value.) % is share of the
-  // whole account, so a ticker you only touch via CSPs/LEAPs still shows up. Each
-  // ticker keeps its per-strategy split so the row can expand and link out.
-  // (Shared with the Brief via lib/holdings so "underweight" matches on both.)
+  // value + CSP collateral + LEAP/hedge market value + spread defined risk. % is
+  // share of the whole account, so a ticker you only touch via CSPs/LEAPs still
+  // shows up. (Shared with the Brief via lib/holdings so "underweight" matches.)
   const holdings = computeHoldings(data);
-  // CSP-board tickers from the Brief, so the Holdings table can tag names that are
-  // both underweight (<8.5%) and a live wheel candidate. Array (not Set) to cross
-  // the server→client boundary; the table rebuilds a Set for lookups.
-  const cspBoard = (getAmReport()?.board ?? []).map((r) => r.sym.toUpperCase());
+  // CSP-board tickers from the Brief, so the Holdings table can green-flag names
+  // that are both underweight (<8.5%) and a live wheel candidate. Array (not Set)
+  // to cross the server→client boundary; the table rebuilds a Set for lookups.
+  const cspBoard = (getAmReport(example)?.board ?? []).map((r) => r.sym.toUpperCase());
 
   const equityPnlTotal = equities.reduce((s, e) => s + equityPnl(e), 0);
   const optionsPnlTotal = options.reduce((s, o) => s + optionPnl(o), 0);
-
-  // Margin/cash breakdown (Robinhood-specific fields; undefined/0 for accounts
-  // without margin data, e.g. cash-only accounts or the static seed data).
-  const marginLimit = summary.marginLimit ?? 0;
-  const marginUsed = summary.marginUsed ?? 0;
-  const optionsCollateral = summary.optionsCollateral ?? 0;
-  // Cash actually free and clear: what's left after backing out both margin
-  // already drawn AND cash tied up as options collateral. Can go negative if
-  // collateral obligations exceed pure cash (i.e. you're leaning on margin to
-  // cover it) — that's intentional, not a bug, and surfaced in red below.
-  const uncommittedCash = summary.cash - marginUsed - optionsCollateral;
-  const marginPct = marginLimit > 0 ? marginUsed / marginLimit : 0;
 
   const first = valueHistory[0].value;
   const last = valueHistory[valueHistory.length - 1].value;
@@ -137,7 +126,7 @@ export default async function HomePage() {
   const share = (v: number) => `${Math.round((v / summary.totalValue) * 100)}%`;
 
   return (
-    <main className="px-4">
+    <main className="px-4 tablet:px-6" data-wide="1">
       <PageHeader
         title="Portfolio"
         subtitle={
@@ -149,8 +138,8 @@ export default async function HomePage() {
         }
         right={
           <div className="flex flex-col items-center gap-2">
-            {/* Market stat stack — BTC spot sits directly above S5FI breadth.
-                Skipped entirely when neither number is available, so the icon row
+            {/* Market stat stack — BTC spot sits directly above S5FI. Skipped
+                entirely when neither number is available, so the icon row
                 doesn't inherit the stack's gap. */}
             {(btc || vix?.s5fi != null) && (
               <div className="flex flex-col items-center gap-1">
@@ -188,216 +177,221 @@ export default async function HomePage() {
               </div>
             )}
             <div className="flex items-center gap-2">
-            <Link
-              href="/settings"
-              aria-label="Settings"
-              title="Settings"
-              className="flex items-center rounded-full bg-surface-2 p-2 text-muted ring-1 ring-inset ring-border active:bg-surface"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-              </svg>
-            </Link>
-            <HideButton />
+              <Link
+                href="/settings"
+                aria-label="Settings"
+                title="Settings"
+                className="flex items-center rounded-full bg-surface-2 p-2 text-muted ring-1 ring-inset ring-border active:bg-surface"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                </svg>
+              </Link>
+              <HideButton />
             </div>
           </div>
         }
       />
 
-      {/* Hero — total value + press-and-drag value-history chart */}
-      <HomeHero
+      {/* Tablet layout: two columns in source order — hero, balances, the two
+          quick-access cards | top movers, volatility — then allocation | holdings.
+          Phone: the same blocks stacked, unchanged. */}
+      <div className="tablet:grid tablet:grid-cols-2 tablet:gap-x-4 tablet:items-start">
+      <div>
+      {/* Hero */}
+      <HomeHeroSim
         totalValue={summary.totalValue}
+        options={options}
         valueHistory={valueHistory}
         trailingDelta={last - first}
         trendPct={trendPct}
       />
 
-      {/* On tablet+ (md), the balances/CSP-access column and the VIX/positioning
-          column sit side by side instead of stacking — same content, no change
-          on phone widths. */}
-      <div className="md:grid md:items-start md:gap-4">
-        <div>
-          {/* Balances — Stocks/Options/Crypto drill into their summaries */}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Link href="/stocks" className="block active:opacity-80">
-              <Stat
-                label="Stocks ›"
-                value={<Amt>{fmtMoney(summary.equityValue)}</Amt>}
-                sub={<><Amt>{`${equityPnlTotal >= 0 ? "+" : "−"}${fmtMoney(Math.abs(equityPnlTotal))}`}</Amt> unreal.</>}
-                tone={equityPnlTotal >= 0 ? "pos" : "neg"}
-                pct={share(summary.equityValue)}
-              />
-            </Link>
-            <Link href="/options" className="block active:opacity-80">
-              <Stat
-                label="Options ›"
-                value={<Amt>{fmtMoney(optionsCapital)}</Amt>}
-                sub={<><Amt>{`${optionsPnlTotal >= 0 ? "+" : "−"}${fmtMoney(Math.abs(optionsPnlTotal))}`}</Amt> unreal.</>}
-                tone={optionsPnlTotal >= 0 ? "pos" : "neg"}
-                pct={share(optionsCapital)}
-              />
-            </Link>
-            <Stat
-              label="Options buying power"
-              value={<Amt>{fmtMoney(summary.optionsBuyingPower ?? summary.buyingPower)}</Amt>}
-              sub={
-                <>
-                  <Amt>
-                    <span className={uncommittedCash < 0 ? "text-rose-400" : undefined}>
-                      {uncommittedCash < 0 ? "−" : ""}
-                      {fmtMoney(Math.abs(uncommittedCash))}
-                    </span>
-                  </Amt>{" "}
-                  uncommitted cash
-                </>
-              }
-              pct={share(summary.cash)}
-            />
-            {marginLimit > 0 && (
-              <Stat
-                label="Margin used"
-                value={<Amt>{fmtMoney(marginUsed)}</Amt>}
-                sub={<>of <Amt>{fmtMoney(marginLimit)}</Amt> limit</>}
-                pct={`${Math.round(marginPct * 100)}%`}
-              />
-            )}
-            <Stat
-              label="Total theta / day"
-              value={<Amt>{`${theta.total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(theta.total))}`}</Amt>}
-              tone={theta.total >= 0 ? "pos" : "neg"}
-              sub={
-                <>
-                  Credit{" "}
-                  <span className="text-emerald-400">
-                    <Amt>{fmtMoney(theta.credit)}</Amt>
-                  </span>{" "}
-                  · Debit{" "}
-                  <span className="text-rose-400">
-                    <Amt>{fmtMoney(Math.abs(theta.debit))}</Amt>
-                  </span>
-                </>
-              }
-            />
-          </div>
-
-          {/* Quick access — CSPs are the core strategy, so surface them up top. */}
-          <Link href="/options/csp" className="mt-3 block active:opacity-80">
-            <Card className="flex items-center justify-between gap-3 bg-sky-500/5 px-4 py-3 ring-1 ring-inset ring-sky-500/25">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-sky-200">Cash-secured puts</div>
-                <div className="text-[11px] text-muted">
-                  {cspCount} open · <Amt>{fmtMoney(cspCollateralValue)}</Amt> collateral
-                </div>
-              </div>
-              <span className="shrink-0 text-sm font-medium text-sky-300">Open ›</span>
-            </Card>
-          </Link>
-
-          {/* Top movers — day's change in net market value per ticker */}
-          <TopMovers equities={equities} options={options} />
-        </div>
-
-        {/* VIX regime + portfolio fit — one concept (the regime sets how your cash
-            should be positioned), so they share a card that taps through to /vix. */}
-        {vix && (
-          <div>
-            <SectionTitle>Volatility &amp; Positioning</SectionTitle>
-            <Card className="divide-y divide-border">
-              <Link href="/vix" className="block active:opacity-80">
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase tracking-wide text-muted">VIX</span>
-                    <span className="tabular text-lg font-bold leading-none">{vix.vix.toFixed(1)}</span>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${REGIME_COLORS[vix.regime].chip}`}>
-                    {vix.regimeLabel}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium">Target: {vix.cashRange} Cash</div>
-                    <AvailableCash
-                      cash={liquidCash}
-                      totalValue={summary.totalValue}
-                      cspCollateral={cspCollateralValue}
-                      spreadRisk={spreadRisk}
-                      optionsBuyingPower={summary.optionsBuyingPower ?? 0}
-                      targetLow={vix.targetReserveLow}
-                      targetHigh={vix.targetReserveHigh}
-                    />
-                  </div>
-                  <span className="shrink-0 text-muted">›</span>
-                </div>
-              </Link>
-              {/* Outside the Link so the reserve-base toggle and breakdown don't navigate. */}
-              <div className="px-4 py-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">Your portfolio</div>
-                <PortfolioFit
-                  a={vix}
-                  cash={liquidCash}
-                  totalValue={summary.totalValue}
-                  cspCollateral={cspCollateralValue}
-                  spreadRisk={spreadRisk}
-                  optionsBuyingPower={summary.optionsBuyingPower ?? 0}
-                  bare
-                />
-              </div>
-            </Card>
-          </div>
+      {/* Balances — Stocks/Options/Crypto drill into their summaries */}
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Link href="/stocks" className="block active:opacity-80">
+          <Stat
+            label="Stocks ›"
+            value={<Amt>{fmtMoney(summary.equityValue)}</Amt>}
+            sub={<><Amt>{`${equityPnlTotal >= 0 ? "+" : "−"}${fmtMoney(Math.abs(equityPnlTotal))}`}</Amt> unreal.</>}
+            tone={equityPnlTotal >= 0 ? "pos" : "neg"}
+            pct={share(summary.equityValue)}
+          />
+        </Link>
+        <Link href="/options" className="block active:opacity-80">
+          <Stat
+            label="Options ›"
+            value={<Amt>{fmtMoney(optionsCapital)}</Amt>}
+            sub={<><Amt>{`${optionsPnlTotal >= 0 ? "+" : "−"}${fmtMoney(Math.abs(optionsPnlTotal))}`}</Amt> unreal.</>}
+            tone={optionsPnlTotal >= 0 ? "pos" : "neg"}
+            pct={share(optionsCapital)}
+          />
+        </Link>
+        <BuyingPowerStat
+          optionsBuyingPower={summary.optionsBuyingPower ?? summary.buyingPower}
+          uncommittedCash={cashValue}
+          marginUsed={marginUsed}
+          totalValue={summary.totalValue}
+        />
+        {/* Robinhood reports the margin line itself: what's approved and how much is
+            actually borrowed. Distinct from the leverage estimate on the tile above. */}
+        {(summary.marginLimit ?? 0) > 0 && (
+          <Stat
+            label="Margin borrowed"
+            value={<Amt>{fmtMoney(summary.marginUsed ?? 0)}</Amt>}
+            sub={<>of <Amt>{fmtMoney(summary.marginLimit ?? 0)}</Amt> limit</>}
+            pct={`${Math.round(((summary.marginUsed ?? 0) / (summary.marginLimit ?? 1)) * 100)}%`}
+          />
         )}
+        <Stat
+          label="Total theta / day"
+          value={<Amt>{`${theta.total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(theta.total))}`}</Amt>}
+          tone={theta.total >= 0 ? "pos" : "neg"}
+          sub={
+            <>
+              Credit{" "}
+              <span className="text-emerald-400">
+                <Amt>{fmtMoney(theta.credit)}</Amt>
+              </span>{" "}
+              · Debit{" "}
+              <span className="text-rose-400">
+                <Amt>{fmtMoney(Math.abs(theta.debit))}</Amt>
+              </span>
+            </>
+          }
+        />
       </div>
 
-      {/* Allocation + Action center share a row on tablet+ too. */}
-      <div className="md:grid md:items-start md:gap-4">
-        <div>
-          <SectionTitle>Allocation</SectionTitle>
-          <Card className="px-4 py-4">
-            <div className="flex items-center gap-4">
-              <Donut slices={allocation} centerTop={<Amt>{fmtMoney(summary.totalValue)}</Amt>} centerBottom="total" />
-              <ul className="flex-1 space-y-2">
-                {allocation.map((s) => {
-                  const pct = s.value / summary.totalValue;
-                  const flag = sliceFlag(s.label, pct);
-                  return (
-                    <li key={s.label}>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
-                          {/* Crypto lost its own tile to the theta tracker, so the legend
-                              keeps the per-coin breakdown reachable. */}
-                          {s.label === "Crypto" ? (
-                            <Link href="/crypto" className="underline decoration-dotted underline-offset-2 active:opacity-70">
-                              {s.label} ›
-                            </Link>
-                          ) : (
-                            s.label
-                          )}
-                        </span>
-                        <span className={`tabular ${flag ? "font-semibold text-red-400" : "text-muted"}`}>
-                          {(pct * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+      {/* Quick access — CSPs are the core strategy, so surface them up top. */}
+      <Link href="/options/csp" className="mt-3 block active:opacity-80">
+        <Card className="flex items-center justify-between gap-3 bg-sky-500/5 px-4 py-3 ring-1 ring-inset ring-sky-500/25">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-sky-200">Cash-secured puts</div>
+            <div className="text-[11px] text-muted">
+              {cspCount} open · <Amt>{fmtMoney(cspCollateralValue)}</Amt> collateral
             </div>
-            <p className="mt-3 border-t border-border pt-2 text-[11px] leading-relaxed text-muted">
-              Options broken out by capital deployed — LEAP &amp; hedge by market value, CSPs by collateral, spreads by
-              defined risk. “Cash” includes money-market/sweep funds (e.g. SWGXX) and excludes the cash securing your CSPs.{" "}
-              <span className="text-red-400">Red</span> = out of band (Stocks &gt;25%, LEAPs &gt;15%, CSPs &lt;55%).
-            </p>
-          </Card>
-        </div>
+          </div>
+          <span className="shrink-0 text-sm font-medium text-sky-300">Open ›</span>
+        </Card>
+      </Link>
+
+      {/* Portfolio risk — sector concentration + theta bands, judged across every
+          account. The subtitle names the heaviest sector so a breach reads from Home. */}
+      <Link href="/risk" className="mt-2 block active:opacity-80">
+        <Card className={`flex items-center justify-between gap-3 px-4 py-3 ring-1 ring-inset ${sectorsOver > 0 ? "bg-rose-500/5 ring-rose-500/25" : "bg-violet-500/5 ring-violet-500/25"}`}>
+          <div className="min-w-0">
+            <div className={`text-sm font-semibold ${sectorsOver > 0 ? "text-rose-200" : "text-violet-200"}`}>Portfolio risk</div>
+            <div className="truncate text-[11px] text-muted">
+              {topSector
+                ? `${topSector.sector} ${(topSector.pct * 100).toFixed(0)}% of portfolio · cap ${(risk.rules.sector.maxAllocationPct * 100).toFixed(0)}%${sectorsOver > 0 ? ` · ${sectorsOver} over` : ""}`
+                : "Sector concentration & theta bands"}
+            </div>
+          </div>
+          <span className={`shrink-0 text-sm font-medium ${sectorsOver > 0 ? "text-rose-300" : "text-violet-300"}`}>View ›</span>
+        </Card>
+      </Link>
 
       </div>
+      <div>
+      {/* Top movers — day's change in net market value per ticker. Off-hours the
+          option day P&L is frozen, so TopMovers projects it via Simulate instead. */}
+      <TopMovers equities={equities} options={options} marketOpen={isRegularSession()} />
 
-      {/* Holdings by ticker — a table wants the full width, not a column */}
-      <p className="mb-2 mt-3 px-1 text-[11px] text-muted">
+      {/* VIX regime + portfolio fit — one concept (the regime sets how your cash
+          should be positioned), so they share a card that taps through to /vix. */}
+      {vix && (
+        <>
+          <SectionTitle>Volatility &amp; Positioning</SectionTitle>
+          <Card className="divide-y divide-border">
+            <Link href="/vix" className="block active:opacity-80">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-wide text-muted">VIX</span>
+                  <span className="tabular text-lg font-bold leading-none">{vix.vix.toFixed(1)}</span>
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${REGIME_COLORS[vix.regime].chip}`}>
+                  {vix.regimeLabel}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium">Target: {vix.cashRange} Cash</div>
+                  <AvailableCash
+                    uncommitted={cashValue}
+                    totalValue={summary.totalValue}
+                    optionsBuyingPower={summary.optionsBuyingPower ?? 0}
+                    targetLow={vix.targetReserveLow}
+                    targetHigh={vix.targetReserveHigh}
+                  />
+                </div>
+                <span className="shrink-0 text-muted">›</span>
+              </div>
+            </Link>
+            {/* Outside the Link so the reserve-base toggle and breakdown don't navigate. */}
+            <div className="px-4 py-3">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">Your portfolio</div>
+              <PortfolioFit
+                a={vix}
+                uncommitted={cashValue}
+                totalValue={summary.totalValue}
+                optionsBuyingPower={summary.optionsBuyingPower ?? 0}
+                bare
+              />
+            </div>
+          </Card>
+        </>
+      )}
+
+      </div>
+      {/* Tablet: the pie is a fixed-size block, so it takes the right column and
+          Holdings — which grows with the number of names — runs down the left.
+          order-last flips them only on the grid; the phone stack stays as-is. */}
+      <div className="tablet:order-last">
+      {/* Allocation */}
+      <SectionTitle>Allocation</SectionTitle>
+      <Card className="px-4 py-4">
+        <div className="flex items-center gap-4">
+          <Donut slices={allocation} centerTop={<Amt>{fmtMoney(summary.totalValue)}</Amt>} centerBottom="total" />
+          <ul className="flex-1 space-y-2">
+            {allocation.map((s) => {
+              const pct = s.value / summary.totalValue;
+              const flag = sliceFlag(s.label, pct);
+              return (
+                <li key={s.label}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
+                      {s.label}
+                    </span>
+                    <span className={`tabular ${flag ? "font-semibold text-red-400" : "text-muted"}`}>
+                      {(pct * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <p className="mt-3 border-t border-border pt-2 text-[11px] leading-relaxed text-muted">
+          Options broken out by capital deployed — LEAP &amp; hedge by market value, CSPs by collateral, spreads by
+          defined risk. “Cash” includes money-market/sweep funds (e.g. SWGXX) and excludes the cash securing your CSPs.{" "}
+          <span className="text-red-400">Red</span> = out of band (Stocks &gt;25%, LEAPs &gt;15%, CSPs &lt;55%).
+        </p>
+      </Card>
+
+      </div>
+      <div>
+      {/* Holdings by ticker */}
+      <div className="hidden tablet:block">
+        <SectionTitle>Holdings by ticker</SectionTitle>
+      </div>
+      <p className="mb-2 mt-3 px-1 text-[11px] text-muted tablet:mt-0">
         Capital per ticker (stocks + CSPs + LEAPs + spreads) — <span className="font-medium text-orange-300">over 10%</span> and{" "}
         <span className="font-medium text-emerald-300">under 5%</span> highlighted; a{" "}
         <span className="font-medium text-emerald-300">CSP</span> tag marks names under 8.5% that are also on the CSP board.
       </p>
       <HoldingsTable rows={holdings} cspBoard={cspBoard} />
+      </div>
+      </div>
 
       <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
         Data is a live snapshot from your Robinhood account. The trend line fills in as

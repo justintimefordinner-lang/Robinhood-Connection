@@ -5,7 +5,6 @@ import { OptionsTypeView, type CspFilter } from "@/components/OptionsTypeView";
 import { TickerBar } from "@/components/TickerBar";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
-import { Freshness } from "@/components/RefreshButton";
 import { getSnapshot } from "@/lib/snapshot";
 import { getSelectedAccount } from "@/lib/account";
 import { getEarnings } from "@/lib/earnings";
@@ -31,15 +30,15 @@ export default async function OptionsCspPage({
   const { mode: closedMode, months: closedMonths } = parseClosedWindow(range, months);
   const snap = await getSnapshot();
   const { id, data } = await getSelectedAccount(snap);
-  const earnings = getEarnings();
+  const earnings = getEarnings(snap.meta.source === "example");
   const sym = symbol?.toUpperCase();
   const allCsps = data.options.filter(isCsp);
   const tickers = [...new Set(allCsps.map((o) => o.symbol.toUpperCase()))].sort();
   const open = allCsps
     .filter((o) => !sym || o.symbol.toUpperCase() === sym)
-    .map((o) => ({ ...o, erDate: earnings[o.symbol.toUpperCase()] ?? null }));
-  const closedCsps = (await getClosedCsps()).closed;
-  const closedLeaps = (await getClosedLeaps()).closed;
+    .map((o) => ({ ...o, erDate: earnings[o.symbol.toUpperCase()] ?? o.erDate ?? null }));
+  const closedCsps = (await getClosedCsps()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
+  const closedLeaps = (await getClosedLeaps()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
 
   return (
     <main className="px-4">
@@ -51,7 +50,6 @@ export default async function OptionsCspPage({
               <AccountSwitcher accounts={snap.accounts} selectedId={id} />
               <span>· {open.length} open</span>
               <DataRefresh status={getRefreshStatus().app} />
-              <Freshness generatedAt={snap.meta.generatedAt} />
             </span>
           }
           right={<BackLink />}
@@ -64,6 +62,7 @@ export default async function OptionsCspPage({
           closedLeaps={closedLeaps}
           initialCspFilter={toCspFilter(filter)}
           initialStatus={view === "closed" ? "closed" : "open"}
+          statusFromUrl={view === "open" || view === "closed"}
           closedMode={closedMode}
           closedMonths={closedMonths}
         />

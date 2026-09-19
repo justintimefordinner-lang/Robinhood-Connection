@@ -6,33 +6,27 @@ import { getSelectedAccount } from "@/lib/account";
 import { computeHoldings, underweightTickers } from "@/lib/holdings";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
-import { AmRefreshButton } from "@/components/AmRefreshButton";
+import { BriefingRefresh } from "@/components/BriefingRefresh";
 
 export const dynamic = "force-dynamic";
 
 function asOfLabel(iso: string): string {
   try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZoneName: "short",
-    });
+    return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });
   } catch {
     return iso;
   }
 }
 
 export default async function BriefingPage() {
-  const report = getAmReport();
-  // Names sitting under 8.5% of the selected account, plus everything held in any
-  // form — the Brief green-flags board rows that are underweight (room to add) or
-  // high-conviction and unheld. Same overlap the Portfolio page tags.
   const snap = await getSnapshot();
   const { data } = await getSelectedAccount(snap);
+  const report = getAmReport(snap.meta.source === "example");
+  // Names sitting under 8.5% of the selected account — the Brief green-flags any
+  // CSP-board row that's also underweight (the same overlap the Portfolio page marks).
   const underweight = underweightTickers(computeHoldings(data));
+  // Everything you already hold in any form (stock or option) — used to spot
+  // high-conviction board names you DON'T own yet.
   const book = Array.from(
     new Set([...data.equities.map((e) => e.symbol.toUpperCase()), ...data.options.map((o) => o.symbol.toUpperCase())]),
   );
@@ -51,7 +45,7 @@ export default async function BriefingPage() {
             "Run am_report.py to build the report"
           )
         }
-        right={report ? <AmRefreshButton asOf={report.meta.asOf} /> : undefined}
+        right={report ? <BriefingRefresh /> : undefined}
       />
       {report ? (
         <AmReportView report={report} underweight={underweight} book={book} />

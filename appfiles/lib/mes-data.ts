@@ -71,7 +71,11 @@ export async function getMesQuote(): Promise<MesQuote | null> {
     const slope = leastSquaresSlope(ys);
     const meanLevel = ys.reduce((s, v) => s + v, 0) / ys.length;
     const last = typeof meta.regularMarketPrice === "number" ? meta.regularMarketPrice : ys[ys.length - 1];
-    const prev = typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null;
+    // Prior session's close from the series itself. NOT meta.chartPreviousClose,
+    // which on a multi-day range is the close *before the range began* — that would
+    // label a month-long move as today's.
+    const allCloses = series.map((d) => d.close);
+    const prev = allCloses.length >= 2 ? allCloses[allCloses.length - 2] : null;
 
     return {
       last,

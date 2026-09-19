@@ -14,6 +14,7 @@ import type { OptionPosition } from "@/lib/types";
 
 const CSP_HEADERS: { key: string; label: string; right?: boolean }[] = [
   { key: "ticker", label: "Ticker" },
+  { key: "bb", label: "BBσ", right: true },
   { key: "dte", label: "DTE", right: true },
   { key: "coll", label: "Coll", right: true },
   { key: "plpct", label: "P/L %", right: true },
@@ -40,6 +41,9 @@ export function OpenGroupCard({
   emptyLabel = "No positions.",
   sort,
   onSort,
+  realById,
+  sim,
+  costBasisBySymbol,
 }: {
   title: string;
   note?: string;
@@ -49,6 +53,11 @@ export function OpenGroupCard({
   emptyLabel?: string;
   sort?: { key: string; dir: "asc" | "desc" };
   onSort?: (key: string) => void;
+  realById?: Map<string, OptionPosition>;
+  sim?: boolean;
+  // Underlying average cost per share, keyed by uppercase symbol. Only the
+  // covered-call view supplies it; rows without an entry show no BC tag.
+  costBasisBySymbol?: Record<string, number>;
 }) {
   const groupValue = items.reduce((s, o) => s + optionMarketValue(o), 0);
   // CSP ledger: premium collected − current cost to buy-to-close = realized gain if closed.
@@ -92,7 +101,7 @@ export function OpenGroupCard({
           );
         })()}
         {items.map((o) => (
-          <OptionRow key={o.id} o={o} />
+          <OptionRow key={o.id} o={o} real={realById?.get(o.id)} sim={sim} costBasis={costBasisBySymbol?.[o.symbol.toUpperCase()]} />
         ))}
         {variant === "csp" ? (
           <div className="space-y-1 px-4 py-2.5 text-[11px]">

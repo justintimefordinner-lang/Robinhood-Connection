@@ -5,7 +5,6 @@ import { StrategyTypeView } from "@/components/StrategyTypeView";
 import { TickerBar } from "@/components/TickerBar";
 import { getRefreshStatus } from "@/lib/refresh-status";
 import { DataRefresh } from "@/components/DataRefresh";
-import { Freshness } from "@/components/RefreshButton";
 import { getSnapshot } from "@/lib/snapshot";
 import { getSelectedAccount } from "@/lib/account";
 import { getClosedCovered } from "@/lib/covered-closed";
@@ -22,9 +21,9 @@ export default async function OptionsSpreadPage({ searchParams }: { searchParams
   const { mode: closedMode, months: closedMonths } = parseClosedWindow(range, months);
   const snap = await getSnapshot();
   const { id, data } = await getSelectedAccount(snap);
-  const closedCovered = (await getClosedCovered()).closed;
-  const closedSpreads = (await getClosedSpreads()).closed;
   const sym = symbol?.toUpperCase();
+  const closedCovered = (await getClosedCovered()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
+  const closedSpreads = (await getClosedSpreads()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
   const allSpreads = data.options.filter(isSpread);
   const tickers = [...new Set(allSpreads.map((o) => o.symbol.toUpperCase()))].sort();
   const open = allSpreads.filter((o) => !sym || o.symbol.toUpperCase() === sym);
@@ -39,7 +38,6 @@ export default async function OptionsSpreadPage({ searchParams }: { searchParams
               <AccountSwitcher accounts={snap.accounts} selectedId={id} />
               <span>· {open.length} legs open</span>
               <DataRefresh status={getRefreshStatus().app} />
-              <Freshness generatedAt={snap.meta.generatedAt} />
             </span>
           }
           right={<BackLink />}
@@ -51,6 +49,7 @@ export default async function OptionsSpreadPage({ searchParams }: { searchParams
           closedCovered={closedCovered}
           closedSpreads={closedSpreads}
           initialStatus={view === "closed" ? "closed" : "open"}
+          statusFromUrl={view === "open" || view === "closed"}
           closedMode={closedMode}
           closedMonths={closedMonths}
         />

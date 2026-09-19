@@ -1,0 +1,55 @@
+# Builds both Dockerfiles on every branch push and pull request WITHOUT
+# publishing anything. The dashboard build is the TypeScript check (`next build`
+# fails on a type error); the bridge build is followed by its offline self-test.
+# main is covered by publish.yml, which builds the same Dockerfiles.
+
+name: Check
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the dashboard image (type-checks and compiles)
+        uses: docker/build-push-action@v6
+        with:
+          context: appfiles
+          push: false
+          cache-from: type=gha,scope=check-dashboard
+          cache-to: type=gha,mode=max,scope=check-dashboard
+
+  bridge:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the bridge image
+        uses: docker/build-push-action@v6
+        with:
+          context: databridge
+          push: false
+          load: true
+          tags: bridge-check:local
+          cache-from: type=gha,scope=check-bridge
+          cache-to: type=gha,mode=max,scope=check-bridge
+      - name: No secret-shaped file made it into the image
+        run: |
+          docker run --rm --entrypoint sh bridge-check:local -c '
+            set -e
+            for n in .env credentials.env reauth_inbox task_inbox; do
+              [ -L "/opt/bridge/$n" ] || { echo "/opt/bridge/$n is not a symlink"; exit 1; }
+            done
+            if find /opt/bridge -name "*.pickle" -o -name "*.json" | grep -q .; then
+              echo "unexpected data file in the image:"; find /opt/bridge -name "*.pickle" -o -name "*.json"; exit 1
+            fi
+            echo ok'
+      - name: Bridge self-test (offline)
+        run: |
+          state="$(mktemp -d)" && chmod 777 "$state"
+          docker run --rm --user 1000:1000 -v "$state:/state" bridge-check:local python /opt/bridge/selftest.py

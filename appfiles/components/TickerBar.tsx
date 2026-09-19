@@ -5,13 +5,14 @@ import Link from "next/link";
 // highlighted from the `active` prop — no client state needed.
 export function TickerBar({ tickers, active, base }: { tickers: string[]; active?: string; base: string }) {
   if (tickers.length <= 1) return null;
-  const chip = (label: string, href: string, on: boolean) => (
-    <Link
-      href={href}
-      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition-colors ${
-        on ? "bg-sky-500/25 text-sky-100 ring-sky-500/50" : "bg-surface-2 text-muted ring-border active:bg-surface"
-      }`}
-    >
+const chip = (label: string, href: string, on: boolean) => (
+  <Link
+    key={href}
+    href={href}
+    className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition-colors ${
+      on ? "bg-sky-500/25 text-sky-100 ring-sky-500/50" : "bg-surface-2 text-muted ring-border active:bg-surface"
+    }`}
+  >
       {label}
     </Link>
   );

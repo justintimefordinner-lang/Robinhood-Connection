@@ -1,9 +1,8 @@
-// appfiles and databridge are sibling folders under ~/Robinhood-Connection. Both the
-// am-refresh route and the settings route need to find databridge/ (one to
-// spawn a script in it, the other to read/write its .env) — this centralizes
-// that resolution so there's one place to fix if your layout differs.
-// Override via AM_REPORT_BRIDGE_DIR (same var app/api/am-refresh/route.ts
-// already documents) if databridge isn't a sibling folder on your setup.
+// Where the Robinhood bridge's folder is, as THIS process sees it. Under Docker
+// the release compose file mounts the bridge's state folder into the dashboard
+// and points AM_REPORT_BRIDGE_DIR at it; run from a checkout, databridge/ is the
+// sibling folder. The app only ever deposits files here (credentials, inbox
+// markers, interval settings) — see lib/bridge-files.ts.
 import path from "node:path";
 
 export const BRIDGE_DIR = process.env.AM_REPORT_BRIDGE_DIR || path.resolve(process.cwd(), "..", "databridge");

@@ -81,7 +81,7 @@ export default async function CryptoPage() {
 
         <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
           Read-only — this app never trades. Crypto totals come from the portfolio snapshot
-          ({snap.meta.pricesAsOf})<DataRefresh nextAt={getRefreshStatus().app?.nextAt} />.
+          ({snap.meta.pricesAsOf})<DataRefresh status={getRefreshStatus().app} />.
         </p>
       </ShowAmounts>
     </main>

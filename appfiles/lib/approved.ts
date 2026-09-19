@@ -54,10 +54,16 @@ export function saveApproved(symbols: string[]): string[] {
 }
 
 export function addApproved(symbol: string): string[] {
-  const u = normalizeSymbol(symbol);
+  return addManyApproved([symbol]);
+}
+
+// Add one or many tickers at once. Each is normalized/validated (invalid ones
+// are silently dropped) and unioned with the current list, preserving order.
+export function addManyApproved(symbols: string[]): string[] {
   const cur = getApproved();
-  if (!u || cur.includes(u)) return cur;
-  return saveApproved([...cur, u]);
+  const additions = dedupe(symbols).filter((u) => !cur.includes(u));
+  if (additions.length === 0) return cur;
+  return saveApproved([...cur, ...additions]);
 }
 
 export function removeApproved(symbol: string): string[] {

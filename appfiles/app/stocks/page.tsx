@@ -18,8 +18,8 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
   const { mode: closedMode, months: closedMonths } = parseClosedWindow(range, months);
   const snap = await getSnapshot();
   const { id, data } = await getSelectedAccount(snap);
-  const closed = (await getClosedStocks()).closed;
   const sym = symbol?.toUpperCase();
+  const closed = (await getClosedStocks()).closed.filter((c) => !sym || c.symbol.toUpperCase() === sym);
   const tickers = [...new Set(data.equities.map((e) => e.symbol.toUpperCase()))].sort();
   const equities = sym ? data.equities.filter((e) => e.symbol.toUpperCase() === sym) : data.equities;
 
@@ -37,7 +37,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
           right={<BackLink />}
         />
         <TickerBar tickers={tickers} active={sym} base="/stocks" />
-        <StocksView equities={equities} closed={closed} initialStatus={view === "closed" ? "closed" : "open"} closedMode={closedMode} closedMonths={closedMonths} laddersNextAt={snap.meta.coveredCallsNextAt ?? undefined} coveredCalls={data.options.filter((o) => o.kind === "covered-call")} />
+        <StocksView equities={equities} closed={closed} initialStatus={view === "closed" ? "closed" : "open"} statusFromUrl={view === "open" || view === "closed"} closedMode={closedMode} closedMonths={closedMonths} laddersNextAt={snap.meta.coveredCallsNextAt ?? undefined} coveredCalls={data.options.filter((o) => o.kind === "covered-call")} />
 
         <Link href="/research?vehicle=Covered" className="mt-3 block active:opacity-80">
           <Card className="flex items-center justify-between px-4 py-3">
@@ -50,7 +50,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
 
         <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
           Per-share price is from the latest snapshot ({snap.meta.pricesAsOf})
-          <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />. Open percentages are
+          <DataRefresh status={getRefreshStatus().app} />. Open percentages are
           unrealized return on cost; closed are realized round-trips.
         </p>
       </ShowAmounts>

@@ -1,9 +1,10 @@
 // Latest BTC/USD spot for the home header.
 //
 // Every other market number in this app arrives as a file the data bridge writes
-// (see vix-data.ts, snapshot.ts). The bridge does report your crypto *positions*,
-// but the header wants live spot whether or not you hold any, so this pulls the
-// price from Yahoo's public no-auth chart endpoint instead.
+// (see vix-data.ts, snapshot.ts) — the app itself never calls out. The bridge is a
+// Schwab client and has no crypto feed, so there is no file to read here. This
+// pulls the price from Yahoo's public no-auth chart endpoint, the same source
+// scripts/csp-discover.mjs already uses for candles.
 //
 // Kept off the critical path as much as a server render allows: the response is
 // cached for a minute, the request aborts after two seconds, and ANY failure
@@ -20,6 +21,10 @@ const YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?int
 const TIMEOUT_MS = 2000;
 const REVALIDATE_S = 60;
 
+// Always live, even in example mode. BTC spot is public market data with nothing
+// account-specific in it, so a demo is better served by the real number than by a
+// frozen one — the same reasoning lib/mes-data.ts already follows. A failed fetch
+// returns null and the header simply omits the line.
 export async function getBtcQuote(): Promise<BtcQuote | null> {
   try {
     const res = await fetch(YAHOO_URL, {
@@ -28,10 +33,17 @@ export async function getBtcQuote(): Promise<BtcQuote | null> {
       next: { revalidate: REVALIDATE_S },
     });
     if (!res.ok) return null;
-    const meta = (await res.json())?.chart?.result?.[0]?.meta;
+    const result = (await res.json())?.chart?.result?.[0];
+    const meta = result?.meta;
     const price = meta?.regularMarketPrice;
     if (typeof price !== "number" || !isFinite(price) || price <= 0) return null;
-    const prev = typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null;
+    // Yesterday's close = the last daily close before the current session. NOT
+    // meta.chartPreviousClose, which on a multi-day range is the close *before the
+    // range began* — that would label a five-day move as today's.
+    const closes: number[] = (result?.indicators?.quote?.[0]?.close ?? []).filter(
+      (c: unknown): c is number => typeof c === "number" && isFinite(c),
+    );
+    const prev = closes.length >= 2 ? closes[closes.length - 2] : null;
     return {
       price,
       changePct: prev && prev > 0 ? (price - prev) / prev : null,

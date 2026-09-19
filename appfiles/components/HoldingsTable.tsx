@@ -1,10 +1,11 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { Amt } from "@/components/privacy";
 import { fmtMoney } from "@/lib/calc";
 import { HEAVY_PCT, LIGHT_PCT, UNDERWEIGHT_PCT, type HoldingRow } from "@/lib/holdings";
+import { usePersistentSet } from "@/lib/view-state";
 
 export type { HoldingBreakout, HoldingRow } from "@/lib/holdings";
 
@@ -25,15 +26,8 @@ function tone(pct: number): { row: string; text: string } {
 }
 
 export function HoldingsTable({ rows, cspBoard }: { rows: HoldingRow[]; cspBoard?: string[] }) {
+  const { has, toggle } = usePersistentSet("holdings");
   const board = useMemo(() => new Set(cspBoard ?? []), [cspBoard]);
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const toggle = (sym: string) =>
-    setOpen((prev) => {
-      const n = new Set(prev);
-      if (n.has(sym)) n.delete(sym);
-      else n.add(sym);
-      return n;
-    });
 
   if (rows.length === 0) {
     return <div className="rounded-xl border border-border px-4 py-5 text-center text-[12px] text-muted">No stock holdings.</div>;
@@ -50,9 +44,9 @@ export function HoldingsTable({ rows, cspBoard }: { rows: HoldingRow[]; cspBoard
         </thead>
         <tbody className="divide-y divide-border">
           {rows.map((r) => {
-            const t = tone(r.pct);
             const overlap = r.pct < UNDERWEIGHT_PCT && board.has(r.symbol.toUpperCase());
-            const isOpen = open.has(r.symbol);
+            const t = tone(r.pct);
+            const isOpen = has(r.symbol);
             const expandable = r.breakout.length > 0;
             return (
               <Fragment key={r.symbol}>

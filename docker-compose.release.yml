@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Portfolio (Robinhood) — release stack
+#
+#  This is what install.sh downloads onto a machine as docker-compose.yml. It
+#  pulls prebuilt images and never compiles anything, so a Raspberry Pi goes
+#  from nothing to running in about a minute — no Node, no Python, no Git, no
+#  pm2, and no clone of this repository.
+#
+#  Folder it lives in:
+#
+#      portfolio-robinhood/
+#      ├── docker-compose.yml
+#      ├── .env                # TZ, UID, GID, port — no secrets
+#      ├── data/               # the shared diode: bridge writes, dashboard reads
+#      └── bridge-state/       # .env, credentials.env, inboxes, .tokens/ (the saved session)
+#
+#  The project name and the port are deliberately NOT the Schwab stack's
+#  (portfolio-manager, 3000), so both run side by side on one machine and the
+#  account switcher's Schwab ⇄ Robinhood link keeps working.
+#
+#  Why data/ is mounted at /app/data in BOTH services: the dashboard writes
+#  APP_DATA_DIR into the bridge's .env using the path the DASHBOARD container
+#  sees. The bridge must find that same folder at that same absolute path.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: portfolio-robinhood
+
+services:
+  dashboard:
+    image: ghcr.io/justintimefordinner-lang/portfolio-dashboard-robinhood:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "${DASHBOARD_PORT:-3001}:3000"
+    environment:
+      # Where the app deposits the sign-in, interval settings and requests.
+      AM_REPORT_BRIDGE_DIR: /bridge-state
+      NODE_ENV: production
+      TZ: ${TZ:-America/Denver}
+    volumes:
+      - ./data:/app/data
+      - ./bridge-state:/bridge-state
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  bridge:
+    image: ghcr.io/justintimefordinner-lang/portfolio-bridge-robinhood:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      TZ: ${TZ:-America/Denver}
+      PYTHONUNBUFFERED: "1"
+      # Works before Settings has ever been opened; the dashboard later writes
+      # the same path into bridge-state/.env.
+      APP_DATA_DIR: /app/data
+    volumes:
+      # Persistent state. /state is the bridge's working directory AND its home
+      # folder, so .env, credentials.env, the inboxes and .tokens/robinhood.pickle
+      # are real files here and the Robinhood session outlives the container.
+      - ./bridge-state:/state
+      # Same absolute path the dashboard uses. See the note at the top.
+      - ./data:/app/data
+
+# No port is published for the bridge, and none is needed: a Robinhood login is
+# approved from the Robinhood app on your phone (or an authenticator key), so
+# nothing ever listens.

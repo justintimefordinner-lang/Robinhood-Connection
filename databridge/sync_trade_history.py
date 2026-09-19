@@ -45,7 +45,9 @@ def _data_dir() -> str:
     return d
 
 
-def main() -> None:
+def main(full: bool = False) -> dict[str, int]:
+    """`full` is accepted for the dashboard's Build history button (backfill.py)
+    and changes nothing: every run already reads the whole order history."""
     load_dotenv()
     import robinhood_client as rc
     import robinhood_orders as ro
@@ -106,6 +108,7 @@ def main() -> None:
         f"Rebuilt closed tabs — CSPs: {counts['csp']}, LEAPs: {counts['leap']}, "
         f"spreads: {counts['spread']}, covered calls: {counts['covered']}, stocks: {counts['stock']}."
     )
+    return counts
 
 
 if __name__ == "__main__":

@@ -51,14 +51,14 @@ export function ResearchView({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  async function mutate(action: "add" | "remove", symbol: string) {
+  async function post(body: Record<string, unknown>) {
     setBusy(true);
     setErr("");
     try {
       const res = await fetch("/api/approved", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, symbol }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (Array.isArray(json.symbols)) setApproved(json.symbols);
@@ -71,13 +71,19 @@ export function ResearchView({
   }
 
   const onAdd = async () => {
-    const u = addInput.trim().toUpperCase();
-    if (!u || busy) return;
-    if (approved.includes(u)) {
+    if (busy) return;
+    // Accept one or many tickers, comma- and/or whitespace-separated
+    // (e.g. "NVDA, AMD TSM"). Invalid ones are dropped server-side.
+    const parsed = addInput
+      .split(/[\s,]+/)
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    const toAdd = [...new Set(parsed)].filter((u) => !approved.includes(u));
+    if (toAdd.length === 0) {
       setAddInput("");
       return;
     }
-    await mutate("add", u);
+    await post({ action: "add", symbols: toAdd });
     setAddInput("");
   };
 
@@ -111,7 +117,7 @@ export function ResearchView({
               onKeyDown={(e) => {
                 if (e.key === "Enter") onAdd();
               }}
-              placeholder="Add ticker (e.g. NVDA)"
+              placeholder="Add tickers (e.g. NVDA, AMD, TSM)"
               className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm uppercase text-text placeholder:normal-case placeholder:text-muted focus:outline-none"
             />
             <button
@@ -152,7 +158,7 @@ export function ResearchView({
             >
               {editing && (
                 <button
-                  onClick={() => mutate("remove", s)}
+                  onClick={() => post({ action: "remove", symbol: s })}
                   disabled={busy}
                   aria-label={`Remove ${s}`}
                   className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500/90 text-[9px] text-white active:bg-rose-600 disabled:opacity-50"

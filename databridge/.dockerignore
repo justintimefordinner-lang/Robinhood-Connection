@@ -1,0 +1,38 @@
+# LOAD-BEARING. The Dockerfile does `COPY . /opt/bridge`, so these exclusions
+# are the only thing keeping a Robinhood password or a live session out of a
+# published image layer. Anything added to this folder that holds a secret must
+# be listed below. Treat every edit to this file as a security change.
+
+.git
+
+# Secrets and live state. Live on the host at /state, never in the image.
+.env
+.env.*
+credentials.env
+credentials.env.*
+.tokens
+reauth_inbox
+task_inbox
+data
+
+# Anything else that could hold a secret or account data.
+*.pickle
+*.pkl
+*.pem
+*.bak
+*.log
+*.json
+credentials*
+
+# Personal notes and scratch text next to a live checkout. requirements.txt
+# is the one .txt the build needs.
+*.txt
+!requirements.txt
+
+.venv
+venv
+__pycache__
+*.pyc
+
+# Docs don't affect the build.
+*.md

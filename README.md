@@ -11,10 +11,43 @@ only through a folder of JSON files on disk:
 
 ---
 
-> **Setting this up for the first time?** Read
-> **[SETUP_GUIDE.md](SETUP_GUIDE.md)** — a step-by-step walkthrough for a Raspberry Pi
-> or your own computer. The quickest route is to hand that file to Claude Code and
-> let it drive the whole install.
+## Install (Docker — a Raspberry Pi, or any computer)
+
+One command. It pulls two prebuilt images and starts them; nothing is compiled
+and no repository is cloned. Needs Docker with Compose v2.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/justintimefordinner-lang/Robinhood-Connection/main/install.sh | bash
+```
+
+Open `http://<that machine>:3001`, then **Settings → Robinhood connection** and
+enter your sign-in. Robinhood sends an approval prompt to your phone; approve it
+and live data starts within a minute. Everything lives in `~/portfolio-robinhood`.
+
+Update later:
+
+```bash
+cd ~/portfolio-robinhood && docker compose pull && docker compose up -d
+```
+
+**Moving from the older pm2 / systemd install?** Stop the old processes, then
+run the installer with `PORTFOLIO_MIGRATE_FROM` pointing at your old checkout.
+It carries over your data, your settings and your saved Robinhood session, so
+the new bridge starts already logged in:
+
+```bash
+pm2 stop appfiles databridge databridge-history databridge-earnings && pm2 save
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/justintimefordinner-lang/Robinhood-Connection/main/install.sh | PORTFOLIO_MIGRATE_FROM=~/Robinhood-Connection bash
+```
+
+> The step-by-step guides further down ([SETUP_GUIDE.md](SETUP_GUIDE.md),
+> [RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md), [INSTALL.md](INSTALL.md)) describe
+> the older run-from-a-checkout install. They still work for development, but the
+> daily trade-history and earnings jobs now run inside `auto_push.py`, and the
+> pm2 / systemd unit files are gone.
 
 ## See the dashboard in 60 seconds (no Robinhood account needed)
 
@@ -43,8 +76,7 @@ the fastest way to see exactly how it looks and behaves.
 
 See **[`RASPBERRY_PI_SETUP.md`](RASPBERRY_PI_SETUP.md)** for a full walkthrough
 (Node/arm64 setup, swap for `next build`, systemd services + timers for
-unattended 24/7 operation). `systemd/` has the ready-to-copy unit files it
-references.
+unattended 24/7 operation). Superseded by the Docker install above.
 
 ---
 

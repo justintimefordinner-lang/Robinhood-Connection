@@ -1,5 +1,5 @@
 import { PageHeader } from "@/components/ui";
-import { ShowAmounts, HideButton } from "@/components/privacy";
+import { ShowAmounts } from "@/components/privacy";
 import { getSnapshot } from "@/lib/snapshot";
 import { getSelectedAccount } from "@/lib/account";
 import { getClosedCsps } from "@/lib/csp-closed";
@@ -9,6 +9,10 @@ import { getClosedSpreads } from "@/lib/spreads-closed";
 import { getClosedStocks } from "@/lib/stocks-closed";
 import { optionPnl, equityPnl, daysBetween } from "@/lib/calc";
 import { PnlView, type BucketInput } from "@/components/PnlView";
+import { BuildHistory } from "@/components/BuildHistory";
+import { CostBasisAlert } from "@/components/CostBasisAlert";
+import { ManualStockEntry } from "@/components/ManualStockEntry";
+import { readUnresolvedStocks, readManualStockSales } from "@/lib/bridge-files";
 import type { OptionKind } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -68,14 +72,33 @@ export default async function PnlPage() {
     { key: "other", label: "Other", items: openByKey.other ?? [] },
   ];
 
+  // New users have no closed round-trips yet — offer a one-time history build.
+  const hasHistory = realized.some((b) => b.items.length > 0);
+  // Stock sales the bridge couldn't auto-cost (bought before our data history).
+  const unresolved = readUnresolvedStocks();
+  // Fully user-added sales that predate the data window entirely.
+  const manualSales = readManualStockSales();
+
   return (
-    <main className="px-4">
+    <main className="px-4 tablet:px-6" data-wide="1">
       <ShowAmounts>
         <PageHeader
           title="Profit & Loss"
           subtitle={`${account.nickname ?? account.mask} · realized and open by strategy`}
-          right={<HideButton />}
+          right={
+            <div className="flex items-center gap-2">
+              <CostBasisAlert unresolved={unresolved} />
+              <BuildHistory hasHistory={hasHistory} />
+            </div>
+          }
         />
+        {!hasHistory && (
+          <p className="mt-3 rounded-xl border border-border bg-surface px-4 py-3 text-center text-xs text-muted">
+            No closed trades yet — tap <span className="font-medium text-text">Build history</span> above to
+            pull your realized trades from Robinhood.
+          </p>
+        )}
+        <ManualStockEntry sales={manualSales} />
         <PnlView realized={realized} open={open} />
       </ShowAmounts>
     </main>

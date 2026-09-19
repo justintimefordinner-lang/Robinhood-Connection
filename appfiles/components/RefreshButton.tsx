@@ -17,24 +17,22 @@ function relativeTime(iso: string): string {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-function tzAbbrev(d: Date): string {
-  try {
-    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(d);
-    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
-  } catch {
-    return "";
-  }
-}
-
-// Absolute run time, formatted as MM/DD/YY H:MM AM/PM TZ (local time + zone).
+// Absolute run time as MM/DD/YY HH:MM in Mountain time (America/Denver), so it reads
+// the same regardless of the viewer's device zone.
 function fmtStamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  const p = (n: number) => String(n).padStart(2, "0");
-  const date = `${p(d.getMonth() + 1)}/${p(d.getDate())}/${String(d.getFullYear()).slice(-2)}`;
-  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
-  const tz = tzAbbrev(d);
-  return `${date} ${time}${tz ? ` ${tz}` : ""}`;
+  return d
+    .toLocaleString("en-US", {
+      timeZone: "America/Denver",
+      month: "2-digit",
+      day: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    .replace(",", "");
 }
 
 /** Read-only "Updated Xm ago" freshness chip; live-updates every 30s. */
