@@ -13,6 +13,7 @@
 // own after a failure. Reconnect is the one deliberate attempt that gets past
 // that lock, which is why the status below spells out what went wrong first.
 import { useCallback, useEffect, useState } from "react";
+import { DEMO_MODE } from "@/lib/demo";
 
 interface Status {
   configured: boolean;
@@ -118,6 +119,17 @@ export function RobinhoodConnect({ bridge = "primary" }: { bridge?: string }) {
     } finally {
       setBusy(null);
     }
+  }
+
+  // A public demo has no bridge to sign in to, and a sign-in form on a public page
+  // only invites someone to type a real password into it.
+  if (DEMO_MODE) {
+    return (
+      <p className="text-xs text-muted">
+        This is the demo, running on sample data. On your own install this is where you enter your Robinhood
+        sign-in, see the login status, and reconnect when a session expires. Your sign-in stays on your machine.
+      </p>
+    );
   }
 
   if (!status) {
