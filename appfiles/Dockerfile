@@ -1,16 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  Trading dashboard — Next.js 16 production build
-#  Commit as:  Trading_Dashboard_App/Dockerfile
+#  Portfolio dashboard (Robinhood) — Next.js 16 production build
+#  Build context: appfiles/
 #
 #  Unlike the bridge, the dashboard's source IS baked in: Next has to compile,
 #  and compiling on every container start would cost minutes on a Pi. Updating
 #  the dashboard is therefore:
 #
-#      git pull && docker compose up -d --build dashboard
+#      docker compose pull && docker compose up -d     (published image)
 #
 #  Uses `output: "standalone"` (set in next.config.ts): the runtime stage
 #  ships only server.js + traced node_modules, roughly 250 MB instead of 1.2 GB.
-#  note at the bottom for the smaller-image version once you're green.
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ---- deps ----------------------------------------------------------------
@@ -40,8 +40,8 @@ WORKDIR /app
 # Link the published package to this repo on GitHub: the package page shows the
 # README and the package can be managed from the repo. Must sit in the final
 # stage — labels set in the deps/build stages do not survive into the image.
-LABEL org.opencontainers.image.source="https://github.com/justintimefordinner-lang/Trading_Dashboard_App"
-LABEL org.opencontainers.image.description="Self-hosted portfolio dashboard for the Schwab market-data bridge"
+LABEL org.opencontainers.image.source="https://github.com/justintimefordinner-lang/Robinhood-Connection"
+LABEL org.opencontainers.image.description="Self-hosted portfolio dashboard for the Robinhood market-data bridge"
 LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 
 RUN apt-get update \

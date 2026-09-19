@@ -1,0 +1,140 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Build and publish both images to GitHub Container Registry:
+#
+#      ghcr.io/<owner>/portfolio-dashboard-robinhood   (appfiles/)
+#      ghcr.io/<owner>/portfolio-bridge-robinhood      (databridge/)
+#
+#  Why the matrix instead of one QEMU job: one runner emulating arm64 makes
+#  `next build` take 30–60 minutes because every instruction is interpreted.
+#  GitHub gives public repos free native arm64 runners, so each architecture
+#  builds on its own hardware in parallel and the merge job stitches the two
+#  into one multi-arch tag. Typical run: a few minutes.
+#
+#  Pushes to main publish. Pushes to any other branch run check.yml instead,
+#  which builds the same Dockerfiles without publishing anything.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Publish images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── one job per image per architecture, each on native hardware ────────
+  build:
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write        # required to push to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [dashboard, bridge]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - image: dashboard
+            context: appfiles
+          - image: bridge
+            context: databridge
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    env:
+      IMAGE_NAME: ${{ github.repository_owner }}/portfolio-${{ matrix.image }}-robinhood
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare platform slug
+        run: echo "SLUG=${{ matrix.platform }}" | tr '/' '-' >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Push by digest only. The merge job below turns these into real tags.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
+          provenance: false
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ env.SLUG }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── stitch the per-arch images into one multi-arch tag, per image ──────
+  merge:
+    runs-on: ubuntu-24.04
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [dashboard, bridge]
+    env:
+      IMAGE_NAME: ${{ github.repository_owner }}/portfolio-${{ matrix.image }}-robinhood
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Create the multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Show what was published
+        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

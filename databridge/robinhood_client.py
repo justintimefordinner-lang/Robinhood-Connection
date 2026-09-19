@@ -52,9 +52,39 @@ import login_guard
 
 load_dotenv()
 
-_USERNAME = os.environ.get("ROBINHOOD_USERNAME")
-_PASSWORD = os.environ.get("ROBINHOOD_PASSWORD")
-_TOTP_SECRET = os.environ.get("ROBINHOOD_TOTP_SECRET")  # optional, for unattended runs
+# The Settings page deposits the sign-in here (bridge working directory), written
+# wholesale and never read back by the dashboard. A hand-edited .env still works.
+CREDENTIALS_FILE = "credentials.env"
+_CREDENTIAL_KEYS = ("ROBINHOOD_USERNAME", "ROBINHOOD_PASSWORD", "ROBINHOOD_TOTP_SECRET")
+
+
+def load_credentials() -> tuple[str | None, str | None, str | None]:
+    """(username, password, totp_secret), read fresh on every call.
+
+    They used to be captured once at import. That was fine while every
+    reconnect was a brand-new process; now the long-running auto_push loop
+    makes the reconnect attempt itself, so a sign-in saved from Settings has to
+    be visible without restarting it. credentials.env wins over .env: it is
+    what the person most recently typed."""
+    from dotenv import dotenv_values, find_dotenv
+
+    # Read the files rather than os.environ, so a key REMOVED from a file (an
+    # authenticator secret that is no longer wanted) actually goes away.
+    merged: dict[str, str | None] = {k: os.environ.get(k) for k in _CREDENTIAL_KEYS}
+    env_path = find_dotenv()
+    if env_path:
+        merged.update({k: v for k, v in dotenv_values(env_path).items() if k in _CREDENTIAL_KEYS})
+    if os.path.exists(CREDENTIALS_FILE):
+        # Wholesale file: whatever it lacks is deliberately absent.
+        owned = dotenv_values(CREDENTIALS_FILE)
+        if owned.get("ROBINHOOD_USERNAME"):
+            merged = {k: owned.get(k) for k in _CREDENTIAL_KEYS}
+    return (
+        merged.get("ROBINHOOD_USERNAME") or None,
+        merged.get("ROBINHOOD_PASSWORD") or None,
+        merged.get("ROBINHOOD_TOTP_SECRET") or None,  # optional, for unattended runs
+    )
+
 
 
 class AuthError(RuntimeError):
@@ -212,10 +242,12 @@ def get_client(force: bool = False, manual: bool = False):
 
     login_guard.check_not_locked(manual=manual)
 
-    if not _USERNAME or not _PASSWORD:
+    username, password, totp_secret = load_credentials()
+    if not username or not password:
         raise AuthError(
             "Missing ROBINHOOD_USERNAME or ROBINHOOD_PASSWORD. "
-            "Copy .env.example to .env and fill in your credentials."
+            "Add your sign-in under Settings -> Robinhood connection, or copy "
+            ".env.example to .env and fill it in."
         )
 
     import robin_stocks.robinhood as rh
@@ -223,10 +255,10 @@ def get_client(force: bool = False, manual: bool = False):
     _install_prompt_poll_retry()
 
     mfa_code = None
-    if _TOTP_SECRET:
+    if totp_secret:
         import pyotp
 
-        mfa_code = pyotp.TOTP(_TOTP_SECRET).now()
+        mfa_code = pyotp.TOTP(totp_secret).now()
 
     # robin_stocks prints its own diagnostic messages during the login/
     # verification flow (e.g. "429 Client Error: Too Many Requests ...
@@ -257,8 +289,8 @@ def get_client(force: bool = False, manual: bool = False):
     try:
         with contextlib.redirect_stdout(tee):
             login_result = rh.login(
-                username=_USERNAME,
-                password=_PASSWORD,
+                username=username,
+                password=password,
                 mfa_code=mfa_code,
                 store_session=True,
             )

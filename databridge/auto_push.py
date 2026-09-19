@@ -9,24 +9,33 @@ public market data. Mirrors schwab-bridge's auto_push.py scope:
   - research   -> research_sync.main()      (research.json)
   - am_report  -> am_report.main()          (am_report.json - Morning Brief)
   - am_ladder  -> am_report.refresh_ladders (light intraday put-premium refresh)
+  - manual     -> manual_positions.main()   (manual/snapshot.json - hand-entered positions)
+  - history    -> sync_trade_history.main() (trade history + the closed tabs)
+  - earnings   -> fetch_earnings.main()     (earnings.json)
 
-NOT included here, by design: sync_trade_history.py. It pulls your ENTIRE
-order history each run (see its docstring) - fine once a day, wasteful and
-slower every 60 seconds. Run it via cron/systemd-timer on a daily cadence
-instead (e.g. after the close):
+history and earnings run ONCE A DAY. sync_trade_history pulls your ENTIRE order
+history each run (see its docstring) - fine daily, wasteful every 60 seconds.
+They used to be systemd timers / pm2 cron entries; a container has neither, so
+they are scheduled here, and the last successful run is remembered across
+restarts (refresh-status.json) so a new image doesn't re-pull everything.
 
-    0 16 * * 1-5  cd /path/to/databridge && ./.venv/bin/python sync_trade_history.py
+Each tick also services what the dashboard asks for by dropping a marker file
+(it can't run anything here itself): a Robinhood reconnect (reauth.py), a trade
+history rebuild (backfill.py) and a Morning Brief refresh (report_refresh.py).
 
 Run with:
     python auto_push.py
 
-Stop with Ctrl+C, or manage as a systemd service (see ../systemd/).
+Stop with Ctrl+C. Runs as the `bridge` container in the release stack.
 
 .env knobs (all optional):
     APP_PUSH_INTERVAL=60         # seconds between app pushes    (0 = disable)
     RESEARCH_PUSH_INTERVAL=900   # seconds between research pushes
     AM_REPORT_PUSH_INTERVAL=1800 # seconds between full Morning Brief rebuilds
     AM_LADDER_PUSH_INTERVAL=300  # seconds between light put-ladder refreshes
+    MANUAL_PUSH_INTERVAL=300     # seconds between manual-position repricing
+    HISTORY_PUSH_INTERVAL=86400  # seconds between trade-history syncs
+    EARNINGS_PUSH_INTERVAL=86400 # seconds between earnings-date refreshes
 
 Read-only throughout - this never places or cancels an order.
 """
@@ -42,6 +51,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TICK_SECONDS = 5
+SLOW_RETRY_SECONDS = 900  # a failed once-a-day job tries again in 15 minutes
+
+
+def _optional(name: str):
+    """Import a module the loop can live without. A broken add-on must never
+    stop the data feeds, so a failure is logged and the feature stays off."""
+    try:
+        return __import__(name)
+    except Exception as exc:  # noqa: BLE001
+        print(f"auto_push: {name} unavailable ({exc}); continuing without it", flush=True)
+        return None
+
+
+# Dashboard-facing add-ons: reconnect requests + login status, the Build history
+# and Morning Brief refresh buttons, and pricing for hand-entered positions.
+reauth = _optional("reauth")
+backfill = _optional("backfill")
+report_refresh = _optional("report_refresh")
+manual_positions = _optional("manual_positions")
 
 
 def _log(msg: str) -> None:
@@ -98,6 +126,9 @@ _ENV_KEY_FOR_LABEL = {
     "research": "RESEARCH_PUSH_INTERVAL",
     "am_report": "AM_REPORT_PUSH_INTERVAL",
     "am_ladder": "AM_LADDER_PUSH_INTERVAL",
+    "history": "HISTORY_PUSH_INTERVAL",
+    "earnings": "EARNINGS_PUSH_INTERVAL",
+    "manual": "MANUAL_PUSH_INTERVAL",
 }
 
 
@@ -211,16 +242,61 @@ def _write_refresh_status(label: str, interval: int, next_run: float, outcome: s
         _log(f"refresh-status: couldn't write {path}: {exc}")
 
 
+def _load_refresh_status() -> None:
+    """Pick up the last run times a previous process recorded, so a restart (a
+    new image, a reboot) doesn't forget that the once-a-day jobs already ran."""
+    data_dir = _refresh_status_data_dir()
+    if not data_dir:
+        return
+    try:
+        with open(os.path.join(data_dir, "refresh-status.json"), encoding="utf-8") as f:
+            saved = json.load(f)
+        if isinstance(saved, dict):
+            _REFRESH_STATUS.update({k: v for k, v in saved.items() if isinstance(v, dict)})
+    except (OSError, ValueError):
+        pass
+
+
+def _resume_at(label: str, interval: int) -> float:
+    """When a slow target should next run, given when it last ran. Due now if
+    it never has, or if its interval already elapsed while we were down - the
+    catch-up behaviour the old systemd timers had with Persistent=true."""
+    last = _REFRESH_STATUS.get(label, {}).get("lastAt")  # last SUCCESS, so a failed run is retried
+    if not last:
+        return 0.0
+    try:
+        return datetime.fromisoformat(last).timestamp() + interval
+    except ValueError:
+        return 0.0
+
+
+def _fetch_earnings() -> None:
+    import fetch_earnings
+
+    fetch_earnings.main(["fetch_earnings"])
+
+
 def main() -> None:
     app_interval = _interval("APP_PUSH_INTERVAL", 60)
     research_interval = _interval("RESEARCH_PUSH_INTERVAL", 900)
     am_report_interval = _interval("AM_REPORT_PUSH_INTERVAL", 1800)
     am_ladder_interval = _interval("AM_LADDER_PUSH_INTERVAL", 300)
+    # Once a day. These two used to be systemd timers / pm2 cron entries; a
+    # container has neither, so they live in this loop now.
+    history_interval = _interval("HISTORY_PUSH_INTERVAL", 86400)
+    earnings_interval = _interval("EARNINGS_PUSH_INTERVAL", 86400)
+    # Every manual contract is its own Robinhood request, so this runs slower than
+    # the snapshot by default (see manual_positions.py).
+    manual_interval = _interval("MANUAL_PUSH_INTERVAL", max(app_interval, 300))
+
+    _load_refresh_status()
 
     targets: list[list] = []
     if app_interval > 0:
         import export_to_app
         targets.append(["app", export_to_app.main, app_interval, 0.0])
+    if manual_interval > 0 and manual_positions is not None:
+        targets.append(["manual", manual_positions.main, manual_interval, 0.0])
     if research_interval > 0:
         import research_sync
         targets.append(["research", research_sync.main, research_interval, 0.0])
@@ -230,9 +306,17 @@ def main() -> None:
     if am_ladder_interval > 0:
         import am_report as _amr
         targets.append(["am_ladder", _amr.refresh_ladders, am_ladder_interval, 0.0])
+    if history_interval > 0:
+        import sync_trade_history
+        targets.append(["history", sync_trade_history.main, history_interval, _resume_at("history", history_interval)])
+    if earnings_interval > 0:
+        targets.append(["earnings", _fetch_earnings, earnings_interval, _resume_at("earnings", earnings_interval)])
 
     if not targets:
         raise SystemExit("Nothing to push. Set at least one *_PUSH_INTERVAL > 0.")
+
+    if reauth is not None:
+        reauth.init_status()
 
     _log(
         "auto_push started - "
@@ -241,6 +325,24 @@ def main() -> None:
     )
     try:
         while True:
+            # Dashboard requests first. Each is one os.path.exists when idle.
+            if reauth is not None:
+                try:
+                    if reauth.process_inbox():
+                        # Signed in again: refresh the fast feeds now rather than
+                        # leaving "Login needed" on screen until their timers lapse.
+                        for t in targets:
+                            if t[0] not in ("history", "earnings"):
+                                t[3] = 0.0
+                except Exception as exc:  # noqa: BLE001 - never let a request stop the loop
+                    _log(f"reauth: ERROR - {exc}")
+            for task in (backfill, report_refresh):
+                if task is not None:
+                    try:
+                        task.process(_log)
+                    except Exception as exc:  # noqa: BLE001
+                        _log(f"{task.__name__}: ERROR - {exc}")
+
             now = time.time()
             _reload_intervals(targets)
             for t in targets:
@@ -252,12 +354,19 @@ def main() -> None:
                             f"{label}: warning - took {elapsed:.0f}s, longer than its "
                             f"{interval}s interval; this target is slipping behind"
                         )
-                    if label == "am_ladder" and isinstance(result, int) and result > 0:
+                    if label in ("history", "earnings") and outcome in ("error", "login_required"):
+                        used = min(interval, SLOW_RETRY_SECONDS)  # don't wait a day to try again
+                    elif label == "am_ladder" and isinstance(result, int) and result > 0:
                         used = result
                     else:
                         used = interval
                     t[3] = time.time() + used
                     _write_refresh_status(label, interval, t[3], outcome, message)
+                    if label == "app" and reauth is not None:
+                        try:
+                            reauth.note_result(outcome)
+                        except Exception as exc:  # noqa: BLE001
+                            _log(f"reauth: ERROR - {exc}")
             time.sleep(TICK_SECONDS)
     except KeyboardInterrupt:
         _log("Stopped.")

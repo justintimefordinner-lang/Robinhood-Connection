@@ -1,4 +1,4 @@
-# Commit as: Trading_Dashboard_App/.dockerignore
+# Build context is appfiles/.
 #
 # Keeps the build context small and — more importantly — keeps live portfolio
 # data and any stray secret out of the image layers.
