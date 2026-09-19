@@ -2,9 +2,9 @@
 
 // P&L "Build history" button — occupies the header slot the example button used
 // to. New users have an empty P&L; this pulls their realized trade history from
-// Schwab via the bridge.
+// Robinhood via the bridge.
 //
-// Write-only, same model as the Schwab connect flow: the app drops a marker and
+// Write-only, same model as the Robinhood connect flow: the app drops a marker and
 // reads a one-way status from its OWN data/ folder — it never touches the
 // bridge's secrets. If history already exists, clicking asks to confirm a rebuild
 // first; a dialog surfaces the result when it finishes.
@@ -25,8 +25,8 @@ const TIMEOUT_MS = 180_000; // room for the full ~2-year backfill before warning
 function friendly(err: string | null): string {
   const e = (err || "").toLowerCase();
   if (e.includes("token") || e.includes("credential") || e.includes("reconnect") || e.includes("auth"))
-    return "Connect your Schwab account first (Settings → Schwab connection).";
-  if (e.includes("no linked")) return "No linked Schwab accounts found.";
+    return "Connect your Robinhood account first (Settings → Robinhood connection).";
+  if (e.includes("no linked")) return "No Robinhood accounts found.";
   return err || "History rebuild failed.";
 }
 
@@ -160,7 +160,7 @@ export function BuildHistory({ hasHistory }: { hasHistory: boolean }) {
     <>
       <button
         onClick={handleClick}
-        title="Build your trade history from Schwab"
+        title="Build your trade history from Robinhood"
         className="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium text-muted ring-1 ring-inset ring-border transition-colors active:bg-surface"
       >
         <ClockIcon />
@@ -207,7 +207,7 @@ export function BuildHistory({ hasHistory }: { hasHistory: boolean }) {
                 <>
                   <div className="text-sm font-semibold text-text">Building trade history…</div>
                   <p className="mt-1.5 text-xs leading-relaxed text-muted">
-                    Pulling your closed trades from Schwab (up to ~2 years). This can take a minute — you can
+                    Pulling your closed trades from Robinhood (your full order history). This can take a minute — you can
                     close this and keep using the app; we&apos;ll pop back up when it&apos;s done.
                   </p>
                   <div className="mt-4">

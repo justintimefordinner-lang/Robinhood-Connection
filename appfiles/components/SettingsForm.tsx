@@ -5,7 +5,7 @@
 // later without turning into one long scroll of unrelated controls.
 import { useState, type ReactNode } from "react";
 import { setIvSkew } from "@/lib/simConfig";
-import { SchwabConnect } from "@/components/SchwabConnect";
+import { RobinhoodConnect } from "@/components/RobinhoodConnect";
 import { LayoutToggle } from "@/components/LayoutToggle";
 import { ManualPositions } from "@/components/ManualPositions";
 import type { ManualAccount } from "@/lib/manual-positions";
@@ -71,7 +71,7 @@ interface Intervals {
 
 const INTERVAL_FIELDS: Array<{ key: keyof Intervals; label: string; hint: string }> = [
   { key: "appMinutes", label: "Portfolio snapshot", hint: "Positions, balances, LEAPs/CSPs — the main dashboard data." },
-  { key: "historyMinutes", label: "Trade history", hint: "Closed-trade / transaction history sync." },
+  { key: "historyMinutes", label: "Trade history", hint: "Closed-trade history sync. Each run re-reads your whole Robinhood order history, so keep this long (1440 = daily)." },
   { key: "researchMinutes", label: "Research", hint: "Approved-stock screener and signal refresh." },
   { key: "amReportMinutes", label: "Morning Brief", hint: "Full rebuild of the daily brief." },
   { key: "amLadderMinutes", label: "Put ladder", hint: "Lighter intraday premium refresh." },
@@ -215,7 +215,7 @@ function SkewSection({ initialSkew }: { initialSkew: number }) {
 export function SettingsForm({
   initialIntervals,
   initialSkew,
-  bridges = [{ id: "primary", label: "Schwab" }],
+  bridges = [{ id: "primary", label: "Robinhood" }],
   accounts = [],
   combineIds = [],
   combinedSelected = false,
@@ -235,11 +235,11 @@ export function SettingsForm({
       {bridges.map((b, i) => (
         <MenuItem
           key={b.id}
-          title={multi ? `${b.label} — Schwab connection` : "Schwab connection"}
-          subtitle={multi ? "Set up or reconnect this login" : "Set up or reconnect your account"}
+          title={multi ? `${b.label} — Robinhood connection` : "Robinhood connection"}
+          subtitle={multi ? "Set up or reconnect this login" : "Sign-in, login status and reconnect"}
           defaultOpen={i === 0}
         >
-          <SchwabConnect bridge={b.id} />
+          <RobinhoodConnect bridge={b.id} />
         </MenuItem>
       ))}
       <MenuItem
@@ -258,7 +258,7 @@ export function SettingsForm({
       <MenuItem title="Simulate skew" subtitle="After-hours what-if IV assumption">
         <SkewSection initialSkew={initialSkew} />
       </MenuItem>
-      <MenuItem title="Manual positions" subtitle="Track positions held elsewhere, priced by Schwab">
+      <MenuItem title="Manual positions" subtitle="Track positions held elsewhere, priced by Robinhood">
         <ManualPositions initial={manual} />
       </MenuItem>
       <MenuItem title="Layout" subtitle="Phone frame or the wide tablet canvas">

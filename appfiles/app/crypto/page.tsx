@@ -72,7 +72,7 @@ export default async function CryptoPage() {
           <Card className="mt-4 px-4 py-5 text-sm text-muted">
             <p className="font-medium text-text">No per-coin breakdown yet</p>
             <p className="mt-1 text-[12px] leading-relaxed">
-              Schwab brokerage accounts don&apos;t hold crypto, so this feed reports a zero
+              No crypto holdings found in this account, so this feed reports a zero
               aggregate. If you track crypto elsewhere, those holdings would need to be added
               to the snapshot separately.
             </p>
@@ -81,7 +81,7 @@ export default async function CryptoPage() {
 
         <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
           Read-only — this app never trades. Crypto totals come from the portfolio snapshot
-          ({snap.meta.pricesAsOf})<DataRefresh nextAt={getRefreshStatus().app?.nextAt} />.
+          ({snap.meta.pricesAsOf})<DataRefresh status={getRefreshStatus().app} />.
         </p>
       </ShowAmounts>
     </main>

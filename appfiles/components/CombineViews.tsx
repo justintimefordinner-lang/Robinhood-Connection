@@ -56,8 +56,8 @@ export function CombineViews({
   if (accounts.length < 2) {
     return (
       <p className="text-xs text-muted">
-        Only one account is linked. Combining needs at least two — add a second Schwab login (see the bridge's
-        README) and it will appear here.
+        Only one account is linked. Combining needs at least two — a second Robinhood account (an IRA, say) or a
+        manual account under Manual positions will appear here.
       </p>
     );
   }

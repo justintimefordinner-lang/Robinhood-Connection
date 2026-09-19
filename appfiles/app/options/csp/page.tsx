@@ -49,7 +49,7 @@ export default async function OptionsCspPage({
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               <AccountSwitcher accounts={snap.accounts} selectedId={id} />
               <span>· {open.length} open</span>
-              <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />
+              <DataRefresh status={getRefreshStatus().app} />
             </span>
           }
           right={<BackLink />}

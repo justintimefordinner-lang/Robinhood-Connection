@@ -19,7 +19,10 @@ export interface PortfolioSummary {
   cryptoValue: number;
   cash: number;
   buyingPower: number;
-  optionsBuyingPower?: number; // Schwab options buying power (deployable, net of collateral)
+  optionsBuyingPower?: number; // options buying power (deployable, net of collateral)
+  marginLimit?: number; // Robinhood: total margin approved for this account (the ceiling)
+  marginUsed?: number; // Robinhood: portion of marginLimit currently drawn (limit - unused)
+  optionsCollateral?: number; // Robinhood: cash currently held against short options positions
 }
 
 export interface Equity {
@@ -65,7 +68,7 @@ export interface CryptoHolding {
   price: number; // latest price per unit
 }
 
-// Extended to carry every category the Schwab bridge (export_to_app.py)
+// Extended to carry every category the bridge (export_to_app.py)
 // classifies. The original three (csp / leap-call / leap-put-hedge) still drive
 // the CSP and LEAPS tabs; the rest flow through the data so nothing is dropped
 // and get their own surfaces incrementally.
@@ -178,7 +181,7 @@ export interface CSPCandidatesFile {
 // A closed cash-secured-put round-trip (reconstructed from option order history).
 export interface ClosedCSP {
   id: string;
-  accountId?: string; // the Schwab account (same opaque id as the snapshot); absent on records built before the bridge stamped it
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   strike: number;
@@ -205,7 +208,7 @@ export interface ClosedCSPFile {
 // A closed long-LEAP round-trip (reconstructed from option order history).
 export interface ClosedLeap {
   id: string;
-  accountId?: string; // the Schwab account (same opaque id as the snapshot); absent on records built before the bridge stamped it
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   optionType: "call" | "put";
@@ -232,7 +235,7 @@ export interface ClosedLeapFile {
 // A closed covered-call round-trip (short call written against stock).
 export interface ClosedCoveredCall {
   id: string;
-  accountId?: string; // the Schwab account (same opaque id as the snapshot); absent on records built before the bridge stamped it
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   strike: number;
@@ -258,7 +261,7 @@ export interface ClosedCoveredFile {
 // A closed vertical-spread round-trip (short + long leg, same expiration).
 export interface ClosedSpread {
   id: string;
-  accountId?: string; // the Schwab account (same opaque id as the snapshot); absent on records built before the bridge stamped it
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   optionType: "call" | "put";
@@ -289,7 +292,7 @@ export interface ClosedSpreadFile {
 // A closed stock round-trip (FIFO buys→sells, or short cover).
 export interface ClosedStock {
   id: string;
-  accountId?: string; // the Schwab account (same opaque id as the snapshot); absent on records built before the bridge stamped it
+  accountId?: string; // the Robinhood account (same opaque id as the snapshot); absent on records built before the bridge stamped it
   symbol: string;
   name: string;
   side: "long" | "short";
@@ -315,7 +318,7 @@ export interface ClosedStockFile {
 export interface SnapshotMeta {
   generatedAt: string; // ISO timestamp the data was pulled
   pricesAsOf: string; // human label, e.g. "2026-06-12 close"
-  source: string; // "schwab-bridge" | "seed"
+  source: string; // "robinhood-mcp" | "seed"
   coveredCallsNextAt?: string | null; // ISO — when the covered-call ladders next refresh; null off-hours
 }
 

@@ -133,7 +133,7 @@ export default async function HomePage() {
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <AccountSwitcher accounts={accounts} selectedId={id} />
             <span>As of {fmtDataStamp(meta.pricesAsOf)}</span>
-            <DataRefresh nextAt={getRefreshStatus().app?.nextAt} />
+            <DataRefresh status={getRefreshStatus().app} />
           </span>
         }
         right={
@@ -234,6 +234,16 @@ export default async function HomePage() {
           marginUsed={marginUsed}
           totalValue={summary.totalValue}
         />
+        {/* Robinhood reports the margin line itself: what's approved and how much is
+            actually borrowed. Distinct from the leverage estimate on the tile above. */}
+        {(summary.marginLimit ?? 0) > 0 && (
+          <Stat
+            label="Margin borrowed"
+            value={<Amt>{fmtMoney(summary.marginUsed ?? 0)}</Amt>}
+            sub={<>of <Amt>{fmtMoney(summary.marginLimit ?? 0)}</Amt> limit</>}
+            pct={`${Math.round(((summary.marginUsed ?? 0) / (summary.marginLimit ?? 1)) * 100)}%`}
+          />
+        )}
         <Stat
           label="Total theta / day"
           value={<Amt>{`${theta.total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(theta.total))}`}</Amt>}
@@ -384,7 +394,7 @@ export default async function HomePage() {
       </div>
 
       <p className="mt-4 px-1 text-[11px] leading-relaxed text-muted">
-        Data is a live snapshot from your Schwab account. The trend line fills in as
+        Data is a live snapshot from your Robinhood account. The trend line fills in as
         history accumulates. Read-only — this app never places trades.
       </p>
     </main>

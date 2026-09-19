@@ -1,5 +1,5 @@
 // Backs the Settings page's refresh-interval controls: reads/writes the
-// *_PUSH_INTERVAL keys in schwab-bridge/.env, which is where auto_push.py
+// *_PUSH_INTERVAL keys in the bridge's .env, which is where auto_push.py
 // reads them from (hot-reloaded every ~5s once the bridge reload patch is in,
 // so a change here takes effect without restarting anything).
 import { demoBlocked } from "@/lib/demo";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_MINUTES = {
   app: 1, // 60s
-  history: 1, // 60s
+  history: 1440, // daily — Robinhood has no incremental feed, each run re-reads the whole order history
   research: 15, // 900s
   amReport: 30, // 1800s
   amLadder: 5, // 300s

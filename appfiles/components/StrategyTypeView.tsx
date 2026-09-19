@@ -153,7 +153,7 @@ export function StrategyTypeView({
             </div>
             {sim && canSim && (
               <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
-                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Schwab close values.
+                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Robinhood close values.
               </p>
             )}
             <OpenGroupCard
@@ -184,7 +184,7 @@ export function StrategyTypeView({
             </div>
             {sim && canSim && (
               <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
-                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Schwab close values.
+                Projected from the current underlying (after-hours) via Δ/Γ — estimates, not Robinhood close values.
               </p>
             )}
             <SpreadGroupCard title="Vertical Spreads" note="tap a column header to sort" spreads={sortedSpreads} emptyLabel={spreadEmpty} sort={sort} onSort={onSort} action={simToggle} realById={rawSpreadById} sim={sim && canSim} />

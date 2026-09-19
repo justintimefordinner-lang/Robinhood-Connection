@@ -3,7 +3,7 @@
 // P&L "Cost basis" card. Some stock sales were opened before the app's transaction
 // history, so the bridge can't compute the gain (no cost basis) or the holding
 // period (no acquired date, so it can't tell short- vs long-term). It surfaces them
-// here; the user supplies a blended $/share (from Schwab) and, to classify the sale
+// here; the user supplies a blended $/share (from Robinhood) and, to classify the sale
 // short vs long-term, the acquired date. Both are stored write-only into the app's
 // own data/, and the bridge turns the sale into a real closed-stock round-trip on
 // its next rebuild. A row that already has a cost but no date reappears here with
@@ -66,7 +66,7 @@ export function StockCostBasis({ unresolved }: { unresolved: UnresolvedStock[] }
       <p className="text-sm font-semibold">Cost basis &amp; holding period</p>
       <p className="mt-1 text-xs text-muted">
         {rows.length} stock {rows.length === 1 ? "sale was" : "sales were"} opened before your data history.
-        Enter the blended cost per share (from Schwab) so it counts in your P&amp;L, and the date you acquired
+        Enter the blended cost per share (from Robinhood) so it counts in your P&amp;L, and the date you acquired
         the shares so it&apos;s classified short- vs long-term. The date is what puts long-held sales in your
         long-term gains.
       </p>

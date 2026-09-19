@@ -1,10 +1,10 @@
 "use client";
 
-// Settings → Manual positions. Track holdings Schwab can't see (another broker,
+// Settings → Manual positions. Track holdings Robinhood can't see (another broker,
 // a 401k window, a paper account): pick or create a manual account, add rows one
-// at a time, or import a spreadsheet. The bridge prices every row from Schwab
+// at a time, or import a spreadsheet. The bridge prices every row from Robinhood
 // market data each cycle, so a manual CSP gets the same mark, Greeks, and
-// Hold / Rollable / At-risk read as a Schwab-held one.
+// Hold / Rollable / At-risk read as a Robinhood-held one.
 //
 // The importer (dialog below) opens with the columns it needs, detects them
 // from the file's headers and values, and — when something it needs is
@@ -107,8 +107,8 @@ export function ManualPositions({ initial }: { initial: ManualAccount[] }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        Positions held somewhere Schwab can&apos;t see. Enter only what a broker can&apos;t look up — size, strike, expiry,
-        what you paid — and the bridge prices them from Schwab market data every cycle. They show up as their own
+        Positions held somewhere Robinhood can&apos;t see. Enter only what a broker can&apos;t look up — size, strike, expiry,
+        what you paid — and the bridge prices them from Robinhood market data every cycle. They show up as their own
         account everywhere positions do.
       </p>
 

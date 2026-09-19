@@ -1,33 +1,28 @@
 // Write-only bridge deposits + one-way status read.
 //
-// The security contract for the Schwab connection: this app DEPOSITS things
+// The security contract for the Robinhood connection: this app DEPOSITS things
 // into the bridge folder and NEVER reads the bridge's secret files back.
-//   * credentials.env      — App Key + Secret, written WHOLESALE (never read/merged)
-//   * reauth_inbox/start   — empty marker: "generate a login URL"
-//   * reauth_inbox/redirect_url — the pasted post-login URL, written wholesale
+//   * credentials.env         — Robinhood sign-in, written WHOLESALE (never read/merged)
+//   * reauth_inbox/reconnect  — empty marker: "make one fresh login attempt now"
 //
 // The only thing the app reads is its OWN data/ folder, where the bridge writes
-// a sanitized schwab-auth.json status (no secrets). See reauth.py on the bridge.
+// a sanitized robinhood-auth.json status (no secrets). See reauth.py on the bridge.
 import fs from "node:fs";
 import path from "node:path";
 import { BRIDGE_DIR } from "@/lib/bridge-dir";
 import type { BridgeInfo } from "@/lib/bridges";
 import { writeEnvUpdates } from "@/lib/env-file";
 
-const DEFAULT_CALLBACK = "https://127.0.0.1:8182";
-
-// Per-bridge reauth file locations. The app deposits into the bridge's OWN folder
-// (credentials.env, .env, reauth_inbox/) and reads the sanitized status the bridge
-// publishes into the app's data dir — base data/ for the primary login, data/<sub>/
-// for an extra login. A bridge's APP_DATA_DIR is exactly the folder holding its status.
+// The app deposits into the bridge's OWN folder (credentials.env, .env,
+// reauth_inbox/) and reads the sanitized status the bridge publishes into the
+// app's data dir. The bridge's APP_DATA_DIR is exactly the folder holding its status.
 function reauthPaths(b: BridgeInfo) {
   const inbox = path.join(b.dir, "reauth_inbox");
   return {
     credentials: path.join(b.dir, "credentials.env"),
     envFile: path.join(b.dir, ".env"),
     inbox,
-    start: path.join(inbox, "start"),
-    redirect: path.join(inbox, "redirect_url"),
+    reconnect: path.join(inbox, "reconnect"),
     appDataDir: path.dirname(b.statusPath),
   };
 }
@@ -40,54 +35,53 @@ function lockDown(file: string): void {
   }
 }
 
+// A value goes on one KEY=value line, so it can't carry a line break.
+const oneLine = (s: string) => s.replace(/[\r\n]+/g, "");
+
 /**
- * WHOLESALE-write the two Schwab secrets into credentials.env. This truncates
- * and replaces the file; it never reads existing contents, so there is no read
- * path to the secret and no stale value can linger on rotation. Because the app
- * owns 100% of this file, wholesale write is safe.
+ * WHOLESALE-write the Robinhood sign-in into credentials.env. This truncates and
+ * replaces the file; it never reads existing contents, so there is no read path
+ * to the password and no stale value can linger when it changes. Because the app
+ * owns 100% of this file, wholesale write is safe. The authenticator secret is
+ * optional — without it Robinhood sends an approval prompt to the phone instead.
  */
-export function writeCredentials(bridge: BridgeInfo, appKey: string, appSecret: string, callbackUrl?: string): void {
+export function writeCredentials(bridge: BridgeInfo, username: string, password: string, totpSecret?: string): void {
   const p = reauthPaths(bridge);
-  const cb = (callbackUrl || "").trim() || DEFAULT_CALLBACK;
+  const totp = oneLine(totpSecret || "").replace(/\s+/g, "");
   const body =
-    "# Written by the Trading Dashboard setup wizard. Do not edit by hand.\n" +
+    "# Written by the dashboard's Settings page. Do not edit by hand.\n" +
     "# Holds secrets — git-ignored, chmod 600.\n" +
-    `SCHWAB_API_KEY=${appKey.trim()}\n` +
-    `SCHWAB_APP_SECRET=${appSecret}\n` +
-    `SCHWAB_CALLBACK_URL=${cb}\n`;
+    `ROBINHOOD_USERNAME=${oneLine(username).trim()}\n` +
+    `ROBINHOOD_PASSWORD=${oneLine(password)}\n` +
+    (totp ? `ROBINHOOD_TOTP_SECRET=${totp}\n` : "");
   fs.mkdirSync(bridge.dir, { recursive: true });
   fs.writeFileSync(p.credentials, body, { mode: 0o600 });
   lockDown(p.credentials);
 
-  // Non-secret config the bridge needs so it writes data/status into THIS bridge's
+  // Non-secret config the bridge needs so it writes data/status into the app's
   // data folder. This touches .env (config, not secrets) via the existing merge
   // helper — credentials themselves never go here.
-  writeEnvUpdates(p.envFile, {
-    APP_DATA_DIR: p.appDataDir,
-    SCHWAB_CALLBACK_URL: cb,
-  });
+  writeEnvUpdates(p.envFile, { APP_DATA_DIR: p.appDataDir });
 }
 
-/** Drop the "please generate a login URL" marker for this bridge. Write-only. */
-export function requestReauthStart(bridge: BridgeInfo): void {
+/** Drop the "make one login attempt now" marker for the bridge. Write-only. */
+export function requestReconnect(bridge: BridgeInfo): void {
   const p = reauthPaths(bridge);
   fs.mkdirSync(p.inbox, { recursive: true });
-  fs.writeFileSync(p.start, "");
+  fs.writeFileSync(p.reconnect, "");
 }
 
-/** Deposit the pasted redirect URL for this bridge to exchange. Write-only. */
-export function submitRedirectUrl(bridge: BridgeInfo, url: string): void {
-  const p = reauthPaths(bridge);
-  fs.mkdirSync(p.inbox, { recursive: true });
-  fs.writeFileSync(p.redirect, url.trim() + "\n", { mode: 0o600 });
-  lockDown(p.redirect);
-}
-
-export interface SchwabAuthStatus {
-  configured: boolean;
-  hasToken: boolean;
-  authStatus: "needs_setup" | "needs_login" | "awaiting_login" | "connected" | "error" | "idle";
-  authorizationUrl: string | null;
+export interface RobinhoodAuthStatus {
+  configured: boolean; // a username + password are on file
+  username: string | null; // masked by the bridge ("ju•••@gmail.com")
+  hasTotp: boolean;
+  hasSession: boolean; // a saved Robinhood session exists
+  authStatus: "needs_setup" | "needs_login" | "connecting" | "connected" | "error";
+  manualRequired: boolean; // automatic retries are paused until Reconnect is pressed
+  lockedUntil: string | null; // time-based cooldown, when one applies
+  consecutiveFailures: number;
+  lastAttemptAt: string | null;
+  lastErrorType: "rate_limited" | "auth_failed" | "unknown" | null;
   error: string | null;
   updatedAt: string | null;
 }
@@ -96,18 +90,24 @@ export interface SchwabAuthStatus {
  * Read the bridge-authored status from the app's OWN data/ folder. Never reads
  * the bridge's secret files. Missing file => treat as un-configured.
  */
-export function readAuthStatus(bridge: BridgeInfo): SchwabAuthStatus {
-  const fallback: SchwabAuthStatus = {
+export function readAuthStatus(bridge: BridgeInfo): RobinhoodAuthStatus {
+  const fallback: RobinhoodAuthStatus = {
     configured: false,
-    hasToken: false,
+    username: null,
+    hasTotp: false,
+    hasSession: false,
     authStatus: "needs_setup",
-    authorizationUrl: null,
+    manualRequired: false,
+    lockedUntil: null,
+    consecutiveFailures: 0,
+    lastAttemptAt: null,
+    lastErrorType: null,
     error: null,
     updatedAt: null,
   };
   try {
     const raw = fs.readFileSync(bridge.statusPath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<SchwabAuthStatus>;
+    const parsed = JSON.parse(raw) as Partial<RobinhoodAuthStatus>;
     return { ...fallback, ...parsed };
   } catch {
     return fallback;

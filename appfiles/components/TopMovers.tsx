@@ -100,7 +100,7 @@ export function TopMovers({
   for (const o of options) {
     if (isCashEquivalent(o.symbol)) continue;
     const m = get(o.symbol);
-    // In the regular session use Schwab's day P&L (dayValueChange = day_pl, exact).
+    // In the regular session use the broker's day P&L (dayValueChange = day_pl, exact).
     // Once the market closes that figure freezes/zeroes, so instead project the leg's
     // move from the underlying's drift since the close via the Simulate engine
     // (Δ/Γ + auto-IV-skew) — ~0 on weekends, live during weeknight extended hours.

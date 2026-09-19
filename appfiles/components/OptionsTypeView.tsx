@@ -251,7 +251,7 @@ export function OptionsTypeView({
             {sim && canSim && (
               <p className="mt-2 px-1 text-[10px] leading-snug text-amber-300/90">
                 Projected from the current underlying (after-hours) via Δ/Γ — marks, P/L and yields are estimates, not
-                Schwab close values.
+                Robinhood close values.
               </p>
             )}
             {groups.map((g, gi) => (

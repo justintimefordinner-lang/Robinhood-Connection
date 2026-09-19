@@ -20,7 +20,7 @@ const TIMEOUT_MS = 90_000; // am_report pulls market data — give it room
 function friendly(err: string | null): string {
   const e = (err || "").toLowerCase();
   if (e.includes("token") || e.includes("credential") || e.includes("reconnect") || e.includes("auth"))
-    return "Connect your Schwab account first (Settings → Schwab connection).";
+    return "Connect your Robinhood account first (Settings → Robinhood connection).";
   return err || "Refresh failed.";
 }
 

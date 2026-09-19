@@ -3,7 +3,7 @@
 // P&L "Add a stock sale" card — for closed stock sales that predate the bridge's
 // data window entirely (so they never appear as cost-basis orphans, e.g. shares
 // held for years then sold before the app started capturing). The user enters the
-// sale straight from their Schwab realized-gains report; it's stored write-only in
+// sale straight from their Robinhood account history; it's stored write-only in
 // the app's own data/manual_stock_sales.json and the bridge books it as a closed
 // long round-trip (correct short/long-term from the acquired/sold dates) on rebuild.
 import { useState } from "react";
@@ -93,7 +93,7 @@ export function ManualStockEntry({ sales }: { sales: ManualStockSale[] }) {
         <>
           <p className="mt-2 text-xs text-muted">
             For sales that predate your data window (held years, sold before the app was tracking) — enter it from
-            your Schwab realized-gains report and it&apos;ll count in the right short/long-term bucket.
+            your Robinhood account history or tax documents and it&apos;ll count in the right short/long-term bucket.
           </p>
 
           <div className="mt-3 grid grid-cols-2 gap-2">

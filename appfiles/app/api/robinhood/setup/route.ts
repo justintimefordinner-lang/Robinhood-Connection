@@ -1,7 +1,7 @@
-// First-run setup: deposit the Schwab App Key + Secret into a bridge's
-// credentials.env (WHOLESALE write — never read back). type=password field on
-// the client; nothing is logged or echoed. This is the app's only write of the
-// secrets, and it never reads them again.
+// Deposit the Robinhood sign-in into the bridge's credentials.env (WHOLESALE
+// write — never read back). type=password field on the client; nothing is
+// logged or echoed. This is the app's only write of the password, and it never
+// reads it again.
 import { demoBlocked } from "@/lib/demo";
 import { writeCredentials } from "@/lib/bridge-files";
 import { bridgeById } from "@/lib/bridges";
@@ -10,9 +10,9 @@ export const dynamic = "force-dynamic";
 
 interface SetupBody {
   bridge?: string;
-  appKey?: string;
-  appSecret?: string;
-  callbackUrl?: string;
+  username?: string;
+  password?: string;
+  totpSecret?: string;
 }
 
 export async function POST(req: Request) {
@@ -28,25 +28,23 @@ export async function POST(req: Request) {
   const bridge = bridgeById(body.bridge);
   if (!bridge) return Response.json({ ok: false, error: "unknown bridge" }, { status: 404 });
 
-  const appKey = (body.appKey || "").trim();
-  const appSecret = body.appSecret || "";
-  const callbackUrl = (body.callbackUrl || "").trim();
+  const username = (body.username || "").trim();
+  const password = body.password || "";
+  const totpSecret = (body.totpSecret || "").trim();
 
-  if (!appKey || !appSecret) {
-    return Response.json(
-      { ok: false, error: "App Key and App Secret are both required." },
-      { status: 400 },
-    );
+  if (!username || !password) {
+    return Response.json({ ok: false, error: "Username and password are both required." }, { status: 400 });
   }
-  if (callbackUrl && !/^https?:\/\//i.test(callbackUrl)) {
+  // The authenticator KEY is the long base32 setup key, not a 6-digit code.
+  if (totpSecret && !/^[A-Za-z2-7\s=]{16,}$/.test(totpSecret)) {
     return Response.json(
-      { ok: false, error: "Callback URL must start with http(s)://" },
+      { ok: false, error: "That isn't an authenticator setup key. Use the long letters-and-digits key, not the 6-digit code." },
       { status: 400 },
     );
   }
 
   try {
-    writeCredentials(bridge, appKey, appSecret, callbackUrl || undefined);
+    writeCredentials(bridge, username, password, totpSecret || undefined);
   } catch {
     // Deliberately generic — never surface a filesystem path that could leak
     // where secrets live.
