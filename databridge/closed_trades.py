@@ -13,9 +13,20 @@ producing one round-trip per matched quantity, and computes realized P&L.
 Anything still open whose expiration has passed with no closing fill is treated
 as expired (CSP = kept the credit; long LEAP = expired worthless).
 
-Read-only. Pure-Python reconstruction (no Schwab calls), so sync_trade_history
+Read-only. Pure-Python reconstruction (no broker calls), so sync_trade_history
 calls it after each update, or run it standalone:
     python closed_trades.py
+
+ON ROBINHOOD DATA. This file is shared, unmodified, with the Schwab bridge;
+robinhood_orders.py shapes Robinhood's order history to look like Schwab's two
+feeds. Robinhood has less to give, so some branches here never fire:
+  * every stock fill carries an orderId and there is no RECEIVE_AND_DELIVER
+    record, so the assignment detection (a no-orderId TRADE at the strike) and
+    the fee netting find nothing. Robinhood does not report assignments at all.
+  * which means shares that ARRIVED by assignment have no purchase on record.
+    When they are later sold, the sale surfaces in stocks-unresolved.json and the
+    dashboard asks for the cost basis (strike minus the premium you kept) — that
+    prompt is the intended way to book those, not an error.
 """
 
 from __future__ import annotations
@@ -37,10 +48,150 @@ SPREADS_FILE = "spreads-closed.json"
 COVERED_FILE = "covered-closed.json"
 STOCKS_FILE = "stocks-closed.json"
 TXNS_FILE = "transactions.json"
+UNRESOLVED_FILE = "stocks-unresolved.json"     # bridge writes: stock sales needing a manual cost basis
+MANUAL_BASIS_FILE = "manual_cost_basis.json"   # app writes: {orphanId: {"costPerShare": x}}
+MANUAL_SALES_FILE = "manual_stock_sales.json"  # app writes: [{symbol, shares, proceedsPerShare, costPerShare, acquiredDate, soldDate}] — sales predating the feed entirely
 SOURCE_LABEL = "databridge"
 
 OPEN_INSTRUCTIONS = {"SELL_TO_OPEN", "BUY_TO_OPEN"}
 CLOSE_INSTRUCTIONS = {"BUY_TO_CLOSE", "SELL_TO_CLOSE"}
+_EQUITY_ORDER_INSTRUCTIONS = {"BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER"}
+
+
+# ---------------------------------------------------------------------------
+# Order records synthesized from the TRANSACTIONS feed.
+#
+# The order store can miss fills: a backfill window that errored used to end the
+# whole walk, and a multi-day sync gap can outrun the rolling window. Each fill
+# still shows up as a TRADE transaction, which carries everything a round-trip
+# needs — the OCC symbol, signed quantity, price, OPENING/CLOSING and the
+# orderId. So any orderId present in the transactions but absent from the order
+# store is rebuilt here in parse_record's shape and fed to the same FIFO. That
+# is what turns a "put expired, kept the whole credit" into the buy-to-close it
+# really was.
+# ---------------------------------------------------------------------------
+def _occ_parts(occ: str) -> tuple[float | None, str | None]:
+    """(strike, expiration ISO) from an OCC symbol like 'SOFI  261009P00016000';
+    (None, None) when it doesn't parse. Local copy of schwab_client's helpers so
+    this module stays free of API imports."""
+    import re
+    m = re.search(r"(\d{6})([CP])(\d{8})$", (occ or "").replace(" ", ""))
+    if not m:
+        return None, None
+    try:
+        exp = datetime.strptime(m.group(1), "%y%m%d").date().isoformat()
+    except ValueError:
+        exp = None
+    return int(m.group(3)) / 1000.0, exp
+
+
+def _instruction_from_txn(position_effect: str, amount: float) -> str:
+    pe = (position_effect or "").upper()
+    if pe == "OPENING":
+        return "BUY_TO_OPEN" if amount > 0 else "SELL_TO_OPEN"
+    if pe == "CLOSING":
+        return "BUY_TO_CLOSE" if amount > 0 else "SELL_TO_CLOSE"
+    return "BUY_TO_OPEN" if amount > 0 else "SELL_TO_CLOSE"
+
+
+def _orders_from_txns(txns: list[dict[str, Any]], known_order_ids: set[Any]) -> list[dict[str, Any]]:
+    """Option orders present in the transactions feed but not in the order store,
+    rebuilt as order records. Multi-fill orders (several TRADE records under one
+    orderId) collapse into one record with volume-weighted leg prices."""
+    by_order: dict[Any, dict[str, Any]] = {}
+    for t in txns:
+        if (t.get("type") or "").upper() != "TRADE":
+            continue
+        oid = t.get("orderId")
+        if oid is None or oid in known_order_ids:
+            continue
+        when = t.get("time") or t.get("tradeDate") or ""
+        for ti in t.get("transferItems", []) or []:
+            instr = ti.get("instrument") or {}
+            if (instr.get("assetType") or "").upper() != "OPTION":
+                continue
+            occ = instr.get("symbol")
+            amount = ti.get("amount") or 0
+            price = ti.get("price")
+            if not occ or not amount or price is None:
+                continue
+            rec = by_order.setdefault(oid, {"orderId": oid, "enteredTime": when, "closeTime": when,
+                                            "status": "FILLED", "orderType": "", "quantity": None,
+                                            "filledQuantity": None, "price": None, "fillPrice": None,
+                                            "symbol": instr.get("underlyingSymbol") or "", "instruction": "",
+                                            "legs": [], "_legs": {}, "synthesized": True})
+            if when and when > rec["closeTime"]:
+                rec["closeTime"] = when
+            if when and when < rec["enteredTime"]:
+                rec["enteredTime"] = when
+            instruction = _instruction_from_txn(ti.get("positionEffect") or "", amount)
+            key = (occ, instruction)
+            leg = rec["_legs"].get(key)
+            if leg is None:
+                occ_strike, occ_exp = _occ_parts(occ)
+                strike = instr.get("strikePrice")
+                if strike is None:
+                    strike = occ_strike
+                exp = (instr.get("expirationDate") or "")[:10] or occ_exp or ""
+                leg = {
+                    "instruction": instruction,
+                    "positionEffect": (ti.get("positionEffect") or "").upper(),
+                    "quantity": 0.0, "_notional": 0.0,
+                    "assetType": "OPTION", "symbol": occ, "legId": len(rec["_legs"]) + 1,
+                    "fillPrice": None,
+                    "ticker": instr.get("underlyingSymbol") or "",
+                    "putCall": (instr.get("putCall") or "").upper(),
+                    "strike": float(strike) if strike is not None else None,
+                    "expiration": exp or None,
+                }
+                rec["_legs"][key] = leg
+            leg["quantity"] += abs(amount)
+            leg["_notional"] += abs(amount) * float(price)
+    out: list[dict[str, Any]] = []
+    for rec in by_order.values():
+        legs = list(rec.pop("_legs").values())
+        for leg in legs:
+            leg["fillPrice"] = leg["_notional"] / leg["quantity"] if leg["quantity"] else None
+            del leg["_notional"]
+        if not legs:
+            continue
+        rec["legs"] = legs
+        rec["instruction"] = legs[0]["instruction"]
+        rec["fillPrice"] = legs[0]["fillPrice"] if len(legs) == 1 else None
+        out.append(rec)
+    return out
+
+
+def _equity_events_from_orders(orders: list[dict[str, Any]], skip_order_ids: set[Any]) -> dict[str, list[dict[str, Any]]]:
+    """Stock buys/sells from the ORDER store, for orders the transactions feed
+    doesn't cover (it reaches back ~60 days; orders go back much further). Only
+    orders whose id is NOT in the transactions feed are used, so a fill is never
+    counted from both sources. Assignments don't appear here — they have no order.
+    Same event shape as _equity_events_from_txns."""
+    by_sym: dict[str, list[dict[str, Any]]] = {}
+    for o in orders:
+        oid = o.get("orderId")
+        if oid is None or oid in skip_order_ids:
+            continue
+        legs = o.get("legs", []) or []
+        for leg in legs:
+            if (leg.get("assetType") or "").upper() not in _EQUITY_ASSET_TYPES:
+                continue
+            instruction = (leg.get("instruction") or "").upper()
+            if instruction not in _EQUITY_ORDER_INSTRUCTIONS:
+                continue
+            sym = leg.get("symbol")
+            qty = abs(leg.get("quantity") or 0)
+            price = leg.get("fillPrice")
+            if price is None and len(legs) == 1:
+                price = o.get("fillPrice")
+            if not sym or not qty or price is None:
+                continue
+            by_sym.setdefault(sym, []).append({
+                "time": o.get("closeTime") or o.get("enteredTime") or "",
+                "instruction": instruction, "qty": qty, "price": float(price), "order_id": oid,
+            })
+    return by_sym
 
 
 def _data_dir() -> str:
@@ -83,7 +234,11 @@ def _events_for_contract(records: list[dict[str, Any]]) -> dict[str, list[dict[s
             if price is None and len(opt_legs) == 1:
                 price = order_fill  # single-leg order: leg price == order fill
             events.setdefault(occ, []).append({
-                "time": o.get("enteredTime", "") or "",
+                # Fill/terminal time (closeTime), NOT placement time (enteredTime):
+                # a GTC limit placed weeks before it fills must be dated — and
+                # FIFO-ordered — by when it actually executed, or the round-trip
+                # lands on the submit date and shows the wrong close date / days-held.
+                "time": o.get("closeTime") or o.get("enteredTime", "") or "",
                 "instruction": (leg.get("instruction") or "").upper(),
                 "positionEffect": (leg.get("positionEffect") or "").upper(),
                 "qty": abs(leg.get("quantity") or 0),
@@ -185,7 +340,7 @@ def _round(n: float, d: int = 2) -> float:
     return round(n, d)
 
 
-def _build_csp(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee) -> dict[str, Any] | None:
+def _build_csp(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee, assigned: bool = False) -> dict[str, Any] | None:
     credit = t["open_price"]
     close_px = t["close_price"]
     strike = t["strike"]
@@ -199,7 +354,15 @@ def _build_csp(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee) -> dict
     collateral = strike * 100 * qty
     days = _days_held(t["open_time"], t["close_time"])
     roc = realized / collateral if collateral else 0.0
-    outcome = "expired" if t["expired"] else ("closed_profit" if realized >= 0 else "closed_loss")
+    if assigned:
+        # Assigned into shares: the net premium is folded into the assigned shares'
+        # cost basis (see build_from_history), so it is NOT also booked as a realized
+        # option gain here — otherwise it double-counts against the reduced stock avg.
+        outcome = "assigned"
+        realized = 0.0
+        roc = 0.0
+    else:
+        outcome = "expired" if t["expired"] else ("closed_profit" if realized >= 0 else "closed_loss")
     return {
         "id": f"{t['ticker']}-{strike}P-{t['expiration']}-{t['open_time'][:10]}",
         "symbol": t["ticker"], "name": t["ticker"],
@@ -209,7 +372,7 @@ def _build_csp(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee) -> dict
         "creditPerShare": _round(credit), "creditReceived": _round(credit_received),
         "costToClose": _round(cost_to_close), "fees": _round(fees), "realizedPnl": _round(realized),
         "outcome": outcome, "daysHeld": days, "collateral": _round(collateral),
-        "returnOnCollateral": _round(roc, 4), "annualized": _round(roc * 365 / days, 4),
+        "returnOnCollateral": _round(roc, 4), "annualized": _round(roc * 365 / days, 4) if days else 0.0,
     }
 
 
@@ -267,6 +430,12 @@ def _spread_partners(records: list[dict[str, Any]]) -> tuple[set[str], set[tuple
                     and a.get("expiration") == b.get("expiration")
                     and a.get("strike") != b.get("strike")
                     and a.get("symbol") and b.get("symbol")
+                    # Both legs must open together (OPENING) or close together (CLOSING)
+                    # to be a vertical. A roll or diagonal — one leg CLOSING and one
+                    # OPENING in the same order — is NOT a spread, even though it also
+                    # has one short-side and one long-side leg.
+                    and (a.get("positionEffect") or "").upper() == (b.get("positionEffect") or "").upper()
+                    and (a.get("positionEffect") or "").upper() in ("OPENING", "CLOSING")
                 ):
                     short_occ = long_occ = None
                     for leg in (a, b):
@@ -282,7 +451,7 @@ def _spread_partners(records: list[dict[str, Any]]) -> tuple[set[str], set[tuple
     return spread_occs, pairs
 
 
-def _build_covered_call(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee) -> dict[str, Any] | None:
+def _build_covered_call(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee, assigned: bool = False) -> dict[str, Any] | None:
     credit = t["open_price"]
     close_px = t["close_price"]
     strike = t["strike"]
@@ -296,7 +465,15 @@ def _build_covered_call(t: dict[str, Any], fpc: Callable[[Any], float] = _no_fee
     notional = strike * 100 * qty
     days = _days_held(t["open_time"], t["close_time"])
     ret = realized / notional if notional else 0.0
-    outcome = "expired" if t["expired"] else ("closed_profit" if realized >= 0 else "closed_loss")
+    if assigned:
+        # Called away: the premium is added to the shares' sale proceeds (see
+        # build_from_history), the way Schwab reports it — the call itself books
+        # no realized gain, otherwise the premium counts twice.
+        outcome = "assigned"
+        realized = 0.0
+        ret = 0.0
+    else:
+        outcome = "expired" if t["expired"] else ("closed_profit" if realized >= 0 else "closed_loss")
     return {
         "id": f"{t['ticker']}-{strike}C-{t['expiration']}-{t['open_time'][:10]}",
         "symbol": t["ticker"], "name": t["ticker"],
@@ -349,35 +526,78 @@ def _build_spread(s: dict[str, Any], l: dict[str, Any], fpc: Callable[[Any], flo
     }
 
 
-def _combine_spreads(s_trips: list[dict[str, Any]], l_trips: list[dict[str, Any]], fpc: Callable[[Any], float] = _no_fee) -> list[dict[str, Any]]:
-    """Pair a spread's short-leg and long-leg round-trips (they open/close
-    together) by chronological order, and value each as one spread."""
-    out = []
-    for s, l in zip(sorted(s_trips, key=lambda t: t["open_time"]),
-                    sorted(l_trips, key=lambda t: t["open_time"])):
-        rec = _build_spread(s, l, fpc)
-        if rec:
+def _closed_together(s: dict[str, Any], l: dict[str, Any]) -> bool:
+    """Two legs form one spread only if they were closed as a unit — in the same
+    closing order, or both expired. Legs closed on different dates ('legged out')
+    are reported individually on their own close dates, matching how Schwab books
+    each lot separately."""
+    so, lo = s.get("close_order"), l.get("close_order")
+    if so is not None and lo is not None:
+        return so == lo
+    if so is None and lo is None:
+        return bool(s.get("expired") and l.get("expired"))
+    return False
+
+
+def _combine_spreads(s_trips: list[dict[str, Any]], l_trips: list[dict[str, Any]], fpc: Callable[[Any], float] = _no_fee) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Pair each short-leg round-trip with the long-leg round-trip it was CLOSED
+    WITH, and value the pair as one spread. Returns (spread_records, leftovers):
+    legs that were legged out (closed at different times) come back as leftovers
+    so the caller reports them as individual single-leg trades on their own dates."""
+    out: list[dict[str, Any]] = []
+    longs = sorted(l_trips, key=lambda t: t["open_time"])
+    used = [False] * len(longs)
+    leftovers: list[dict[str, Any]] = []
+    for s in sorted(s_trips, key=lambda t: t["open_time"]):
+        mi = next((i for i, l in enumerate(longs) if not used[i] and _closed_together(s, l)), None)
+        rec = _build_spread(s, longs[mi], fpc) if mi is not None else None
+        if rec is not None:
+            used[mi] = True
             out.append(rec)
-    return out
+        else:
+            leftovers.append(s)  # no closed-together partner (or unvaluable) → individual
+    leftovers.extend(l for i, l in enumerate(longs) if not used[i])
+    return out, leftovers
 
 
 _EQUITY_ASSET_TYPES = {"EQUITY", "COLLECTIVE_INVESTMENT"}
 
 
-def _equity_events_from_txns(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _is_assignment(txn: dict[str, Any]) -> bool:
+    """A RECEIVE_AND_DELIVER removes an option either by ASSIGNMENT (shares move
+    at the strike) or by EXPIRATION (the option simply drops off — no shares
+    move). Schwab distinguishes them only in the free-text description:
+    'Removed due to Assignment ...' vs 'Removed due to Expiration ...'. Treating
+    an expiration as an assignment invents a phantom stock disposal, so gate on
+    this."""
+    return "assignment" in (txn.get("description") or "").lower()
+
+
+def _equity_events_from_txns(records: list[dict[str, Any]], prem_per_share: dict[tuple[str, float, str], float] | None = None) -> dict[str, list[dict[str, Any]]]:
     """Per-symbol chronological equity events from the TRANSACTIONS feed.
 
     Two sources, so assignment cost basis is captured (orders miss it):
       • TRADE with an EQUITY/ETF item → a real buy/sell. positionEffect + the
-        sign of `amount` give open/close and long/short.
-      • RECEIVE_AND_DELIVER with an OPTION item → an assignment. A PUT assignment
-        means shares were put to you (BUY at strike); a CALL assignment means
-        shares were called away (SELL at strike). Strike = cost/sale basis.
+        sign of `amount` give open/close and long/short. Schwab posts the shares
+        an assignment moves as one of these too: a TRADE with NO orderId at
+        exactly the strike (verified against a Schwab lot report). That is the
+        authoritative record of the assignment — real date, real share count.
+      • RECEIVE_AND_DELIVER with an OPTION item → the assignment's option-removal
+        side. It used to ALSO become a share event, which double-booked every
+        assignment (500 shares bought at the netted price AND 500 at the raw
+        strike), so FIFO later sold against phantom raw-strike lots and showed
+        losses Schwab never had. Now it only supplies what the TRADE lacks —
+        which strike's premium to net off the shares — and creates a share
+        event itself only when no matching no-orderId TRADE exists (older feeds).
     """
     by_sym: dict[str, list[dict[str, Any]]] = {}
+    # Assignment share movements from the TRADE side: (symbol, strike, qty) → events,
+    # so the RECEIVE_AND_DELIVER pass below can claim (and price) them.
+    strike_trades: dict[tuple[str, float], list[dict[str, Any]]] = {}
     for t in records:
         ttype = (t.get("type") or "").upper()
         when = t.get("tradeDate") or t.get("time") or ""
+        oid = t.get("orderId")
         for ti in t.get("transferItems", []) or []:
             instr = ti.get("instrument") or {}
             atype = (instr.get("assetType") or "").upper()
@@ -395,36 +615,108 @@ def _equity_events_from_txns(records: list[dict[str, Any]]) -> dict[str, list[di
                     instruction = "SELL" if amount < 0 else "BUY_TO_COVER"
                 else:  # fall back to sign
                     instruction = "BUY" if amount > 0 else "SELL"
-                by_sym.setdefault(sym, []).append(
-                    {"time": when, "instruction": instruction, "qty": abs(amount), "price": price}
-                )
+                ev = {"time": when, "instruction": instruction, "qty": abs(amount), "price": float(price), "order_id": oid}
+                by_sym.setdefault(sym, []).append(ev)
+                if oid is None:
+                    strike_trades.setdefault((sym, round(float(price), 2)), []).append(ev)
 
-            elif ttype == "RECEIVE_AND_DELIVER" and atype == "OPTION":
-                pc = (instr.get("putCall") or "").upper()
-                strike = instr.get("strikePrice")
-                underlying = instr.get("underlyingSymbol")
-                contracts = abs(ti.get("amount") or 0)
-                deliverables = instr.get("optionDeliverables") or []
-                per = (deliverables[0].get("deliverableUnits") if deliverables else None) \
-                    or instr.get("optionPremiumMultiplier") or 100
-                shares = contracts * per
-                if not underlying or strike is None or shares <= 0 or pc not in ("PUT", "CALL"):
+    for t in records:
+        if (t.get("type") or "").upper() != "RECEIVE_AND_DELIVER":
+            continue
+        if not _is_assignment(t):
+            continue   # expiration removal — the option is gone but no shares moved
+        when = t.get("tradeDate") or t.get("time") or ""
+        oid = t.get("orderId")
+        for ti in t.get("transferItems", []) or []:
+            instr = ti.get("instrument") or {}
+            if (instr.get("assetType") or "").upper() != "OPTION":
+                continue
+            pc = (instr.get("putCall") or "").upper()
+            strike = instr.get("strikePrice")
+            underlying = instr.get("underlyingSymbol")
+            contracts = abs(ti.get("amount") or 0)
+            deliverables = instr.get("optionDeliverables") or []
+            per = (deliverables[0].get("deliverableUnits") if deliverables else None) \
+                or instr.get("optionPremiumMultiplier") or 100
+            shares = contracts * per
+            if not underlying or strike is None or shares <= 0 or pc not in ("PUT", "CALL"):
+                continue
+            skey = (underlying, round(float(strike), 2))
+            prem = (prem_per_share or {}).get((underlying, round(float(strike), 2), pc), 0.0)
+            # Option A: the matched option's premium lives in the shares rather than
+            # being double-counted as a realized option gain — a put's premium comes
+            # OFF the cost basis, a called-away call's premium goes ON the sale
+            # proceeds. prem is 0.0 when no assigned option was matched.
+            netted = float(strike) - prem if pc == "PUT" else float(strike) + prem
+            # Claim the TRADE-side share movement(s) for this assignment: the same
+            # symbol at exactly the strike, no orderId, until the contracts' shares
+            # are covered. Price those events at the netted figure; add nothing.
+            remaining = shares
+            for ev in strike_trades.get(skey, []):
+                if remaining <= 0:
+                    break
+                if ev.get("_claimed"):
                     continue
-                # PUT assigned → buy shares at strike; CALL assigned → sell at strike.
-                instruction = "BUY" if pc == "PUT" else "SELL"
+                want = "BUY" if pc == "PUT" else "SELL"
+                if ev["instruction"] != want:
+                    continue
+                ev["_claimed"] = True
+                ev["price"] = netted
+                remaining -= ev["qty"]
+            if remaining > 0:
+                # No TRADE-side record (older feeds) — fall back to the old behaviour.
                 by_sym.setdefault(underlying, []).append(
-                    {"time": when, "instruction": instruction, "qty": shares, "price": strike}
+                    {"time": when, "instruction": "BUY" if pc == "PUT" else "SELL",
+                     "qty": remaining, "price": netted, "order_id": oid}
                 )
-    return by_sym
+    for evs in by_sym.values():
+        for ev in evs:
+            ev.pop("_claimed", None)
+    # Collapse multi-fill orders: one sell/buy order can fill in several lots, each
+    # arriving as its own transaction under a shared orderId. Merge them so a
+    # 1,000-share order that filled 934 + 66 is one 1,000-share event, not two.
+    return {sym: _coalesce_orders(evs) for sym, evs in by_sym.items()}
 
 
-def _equity_round_trips(evs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _coalesce_orders(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge executions that share an orderId + instruction into a single event:
+    quantities summed, price share-weighted, earliest fill time kept. Events with
+    no orderId (e.g. assignments) pass through untouched, so distinct dispositions
+    stay separate."""
+    merged: dict[tuple[Any, str], dict[str, Any]] = {}
+    out: list[dict[str, Any]] = []
+    for ev in events:
+        oid = ev.get("order_id")
+        if oid is None:
+            out.append(ev)
+            continue
+        key = (oid, ev["instruction"])
+        slot = merged.get(key)
+        if slot is None:
+            slot = {"time": ev["time"], "instruction": ev["instruction"],
+                    "qty": 0.0, "_notional": 0.0, "order_id": oid}
+            merged[key] = slot
+            out.append(slot)
+        slot["qty"] += ev["qty"]
+        slot["_notional"] += ev["qty"] * ev["price"]
+        if ev["time"] < slot["time"]:
+            slot["time"] = ev["time"]
+    for slot in merged.values():
+        slot["price"] = slot["_notional"] / slot["qty"] if slot["qty"] else 0.0
+        del slot["_notional"]
+    return out
+
+
+def _equity_round_trips(evs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """FIFO-match equity opens to closes. Longs: BUY opens, SELL closes. Shorts:
-    SELL_SHORT opens, BUY_TO_COVER closes. Long and short lots queue separately."""
+    SELL_SHORT opens, BUY_TO_COVER closes. Long and short lots queue separately.
+    Returns (round_trips, orphans): orphans are closes with no matching open lot
+    (the purchase predates our transaction history) — they need a manual cost basis."""
     evs = sorted(evs, key=lambda e: e["time"])
     long_lots: deque[dict[str, Any]] = deque()
     short_lots: deque[dict[str, Any]] = deque()
     trips: list[dict[str, Any]] = []
+    orphans: list[dict[str, Any]] = []
 
     def close_against(lots: deque[dict[str, Any]], ev: dict[str, Any], side: str) -> None:
         remaining = ev["qty"]
@@ -440,6 +732,12 @@ def _equity_round_trips(evs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             remaining -= matched
             if lot["qty"] == 0:
                 lots.popleft()
+        if remaining > 0:
+            # Sold more than we have an opening record for — the purchase is older
+            # than the transaction feed. Surface it so the user can supply a basis.
+            orphans.append({"side": side, "qty": remaining,
+                            "close_time": ev["time"], "close_price": ev["price"],
+                            "order_id": ev.get("order_id")})
 
     for ev in evs:
         instr = ev["instruction"]
@@ -451,7 +749,7 @@ def _equity_round_trips(evs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             close_against(long_lots, ev, "long")
         elif instr == "BUY_TO_COVER":
             close_against(short_lots, ev, "short")
-    return trips
+    return trips, orphans
 
 
 def _build_stock(t: dict[str, Any], symbol: str, idx: int) -> dict[str, Any] | None:
@@ -473,7 +771,7 @@ def _build_stock(t: dict[str, Any], symbol: str, idx: int) -> dict[str, Any] | N
         "costBasis": _round(cost_basis), "proceeds": _round(proceeds),
         "realizedPnl": _round(realized), "outcome": outcome,
         "openedAt": t["open_time"][:10], "closedAt": (t["close_time"] or "")[:10],
-        "daysHeld": days, "returnPct": _round(ret, 4), "annualized": _round(ret * 365 / days, 4),
+        "daysHeld": days, "returnPct": _round(ret, 4), "annualized": _round(ret * 365 / days, 4) if days else 0.0,
     }
 
 
@@ -518,9 +816,49 @@ def _fee_index_by_order(txns_store: dict[str, list[dict[str, Any]]] | None) -> d
     return idx
 
 
+def _assignment_contracts(records: list[dict[str, Any]]) -> dict[tuple[str, float, str], float]:
+    """From one account's TRANSACTIONS feed: total assigned contracts per
+    (underlying, strike, 'PUT'|'CALL'). Lets us tell which expired short options
+    were actually assigned (vs expired worthless): an assigned put's premium is
+    folded into the shares' cost basis, an assigned (called-away) call's premium
+    into the shares' sale proceeds — Schwab's convention — instead of being
+    double-counted as a realized option gain."""
+    out: dict[tuple[str, float, str], float] = {}
+    for t in records:
+        if (t.get("type") or "").upper() != "RECEIVE_AND_DELIVER":
+            continue
+        if not _is_assignment(t):
+            continue   # expired, not assigned — no shares, no premium to fold
+        for ti in t.get("transferItems", []) or []:
+            instr = ti.get("instrument") or {}
+            if (instr.get("assetType") or "").upper() != "OPTION":
+                continue
+            pc = (instr.get("putCall") or "").upper()
+            if pc not in ("PUT", "CALL"):
+                continue
+            strike = instr.get("strikePrice")
+            underlying = instr.get("underlyingSymbol")
+            contracts = abs(ti.get("amount") or 0)
+            if underlying and strike is not None and contracts > 0:
+                key = (underlying, round(float(strike), 2), pc)
+                out[key] = out.get(key, 0.0) + contracts
+    return out
+
+
+def _orphan_id(symbol: str, orph: dict[str, Any]) -> str:
+    """Stable id for an unmatched stock sale, so a user-entered basis sticks
+    across rebuilds. Two same-day sales at the same price (e.g. a market sell and
+    a covered-call assignment) are disambiguated by the '#N' counter in
+    build_from_history rather than the orderId, so ids stay stable even for
+    assignment legs that carry no orderId."""
+    return f"{symbol}|{(orph.get('close_time') or '')[:10]}|{orph['qty']:g}|{orph.get('close_price')}"
+
+
 def build_from_history(
     store: dict[str, list[dict[str, Any]]],
     txns_store: dict[str, list[dict[str, Any]]] | None = None,
+    manual_basis: dict[str, dict[str, Any]] | None = None,
+    manual_sales: list[dict[str, Any]] | None = None,
 ) -> dict[str, list]:
     today = datetime.now(timezone.utc).date()
     csp_closed: list[dict[str, Any]] = []
@@ -528,6 +866,9 @@ def build_from_history(
     spread_closed: list[dict[str, Any]] = []
     covered_closed: list[dict[str, Any]] = []
     stock_closed: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []   # stock sales whose purchase predates our data
+    seen_orphan_ids: dict[str, int] = {}    # guarantees each surfaced sale has a unique id
+    manual_basis = manual_basis or {}
 
     # Per-contract option fees, joined to round-trips by orderId, so realized P&L
     # comes out net of commissions/regulatory fees (matching Schwab).
@@ -542,45 +883,164 @@ def build_from_history(
             return 0.0
         return slot["fee"] / slot["contracts"]
 
-    # Options come from the ORDERS feed.
-    for records in store.values():
-        spread_occs, pairs = _spread_partners(records)
-        trips_by_occ = {occ: _fifo_round_trips(evs, today) for occ, evs in _events_for_contract(records).items()}
+    txns_store = txns_store or {}
+    # Process each account with BOTH feeds together, so an assigned put (orders
+    # feed) can hand its premium to its shares (transactions feed) within the
+    # same account.
+    for aid in set(store) | set(txns_store):
+        orders = list(store.get(aid, []))
+        txns = txns_store.get(aid, [])
+        # Fills the order sync missed but the transactions feed has: rebuild them
+        # as orders so their closes count (see _orders_from_txns).
+        known_ids = {o.get("orderId") for o in orders if o.get("orderId") is not None}
+        recovered = _orders_from_txns(txns, known_ids)
+        if recovered:
+            print(f"  recovered {len(recovered)} option orders from the transactions feed")
+            orders.extend(recovered)
+        txn_order_ids = {t.get("orderId") for t in txns if t.get("orderId") is not None}
+        # Where each output list stood before this account, so everything it adds
+        # can be stamped with the account at the end of the loop.
+        _outputs = (csp_closed, leap_closed, spread_closed, covered_closed, stock_closed, unresolved)
+        _marks = [len(lst) for lst in _outputs]
 
-        # Spreads: combine each detected short/long pair into one round-trip.
+        # PUT contracts assigned per (underlying, strike); we draw from this budget
+        # to decide which expired short puts were assigned.
+        assign_budget = _assignment_contracts(txns)
+        # Net premium of the options we mark assigned, to fold into those shares'
+        # basis (puts) or proceeds (calls): {(underlying, strike, pc): [net_premium_dollars, shares]}.
+        assign_premium: dict[tuple[str, float, str], list[float]] = {}
+
+        # ---- Options: from the ORDERS feed ----
+        spread_occs, pairs = _spread_partners(orders)
+        trips_by_occ = {occ: _fifo_round_trips(evs, today) for occ, evs in _events_for_contract(orders).items()}
+
+        # Spreads: merge only legs CLOSED TOGETHER; legged-out legs come back as
+        # leftovers to be reported individually on their own close dates.
+        spread_leftovers: list[dict[str, Any]] = []
         for short_occ, long_occ in pairs:
-            spread_closed.extend(_combine_spreads(trips_by_occ.get(short_occ, []), trips_by_occ.get(long_occ, []), fpc))
+            recs, leftover = _combine_spreads(trips_by_occ.get(short_occ, []), trips_by_occ.get(long_occ, []), fpc)
+            spread_closed.extend(recs)
+            spread_leftovers.extend(leftover)
 
-        # Everything that ISN'T a spread leg classifies on its own.
-        for occ, trips in trips_by_occ.items():
-            if occ in spread_occs:
-                continue
-            for t in trips:
-                is_put = t["putCall"] in ("PUT", "P")
-                if t["short"] and is_put:
-                    rec = _build_csp(t, fpc)             # naked short put = CSP
-                    if rec:
-                        csp_closed.append(rec)
-                elif t["short"] and not is_put:
-                    rec = _build_covered_call(t, fpc)    # short call = covered call
-                    if rec:
-                        covered_closed.append(rec)
-                elif not t["short"]:
-                    rec = _build_leap(t, fpc)            # long call/put = LEAP
-                    if rec:
-                        leap_closed.append(rec)
+        # Individual single-leg trades: every non-spread contract's round-trips,
+        # plus any legged-out spread legs.
+        individual = [t for occ, trips in trips_by_occ.items() if occ not in spread_occs for t in trips]
+        individual.extend(spread_leftovers)
 
-    # Stocks come from the TRANSACTIONS feed (captures assignment cost basis).
-    for records in (txns_store or {}).values():
-        for sym, evs in _equity_events_from_txns(records).items():
-            for i, t in enumerate(_equity_round_trips(evs)):
+        for t in individual:
+            is_put = t["putCall"] in ("PUT", "P")
+            if t["short"] and is_put:
+                # A short put that passed expiration with no closing order is either
+                # expired-worthless OR assigned. If the transactions feed shows an
+                # assignment at this (underlying, strike), treat it as assigned and
+                # hand its premium to the shares (Option A).
+                key = (t["ticker"], round(float(t["strike"]), 2), "PUT") if t["strike"] is not None else None
+                assigned = bool(t["expired"] and key and assign_budget.get(key, 0.0) >= t["qty"])
+                rec = _build_csp(t, fpc, assigned=assigned)
+                if not rec:
+                    continue
+                csp_closed.append(rec)
+                if assigned and key:
+                    assign_budget[key] -= t["qty"]
+                    slot = assign_premium.setdefault(key, [0.0, 0.0])
+                    slot[0] += rec["creditReceived"] - rec["fees"]  # net premium $
+                    slot[1] += t["qty"] * 100                       # shares assigned
+            elif t["short"] and not is_put:
+                # A short call that passed expiration with no closing order was either
+                # expired-worthless or called away. Same test as the puts above.
+                key = (t["ticker"], round(float(t["strike"]), 2), "CALL") if t["strike"] is not None else None
+                assigned = bool(t["expired"] and key and assign_budget.get(key, 0.0) >= t["qty"])
+                rec = _build_covered_call(t, fpc, assigned=assigned)    # short call = covered call
+                if not rec:
+                    continue
+                covered_closed.append(rec)
+                if assigned and key:
+                    assign_budget[key] -= t["qty"]
+                    slot = assign_premium.setdefault(key, [0.0, 0.0])
+                    slot[0] += rec["creditReceived"] - rec["fees"]  # net premium $
+                    slot[1] += t["qty"] * 100                       # shares called away
+            elif not t["short"]:
+                rec = _build_leap(t, fpc)            # long call/put = LEAP
+                if rec:
+                    leap_closed.append(rec)
+
+        # ---- Stocks: from the TRANSACTIONS feed, with assigned-put premium netted
+        #      off the shares' cost basis (contracts-weighted per strike). Sales whose
+        #      purchase predates the feed get a user-entered basis if one is on file,
+        #      otherwise they're surfaced as "unresolved" for the app to prompt. ----
+        prem_per_share = {k: (v[0] / v[1] if v[1] else 0.0) for k, v in assign_premium.items()}
+        equity_events = _equity_events_from_txns(txns, prem_per_share)
+        # Stock fills older than the transactions feed reaches come from the order
+        # store instead (orders whose id the feed doesn't carry). Both sources feed
+        # one FIFO per symbol, so a January buy can match an August sale.
+        for sym, evs in _equity_events_from_orders(orders, txn_order_ids).items():
+            equity_events.setdefault(sym, []).extend(evs)
+        for sym, evs in equity_events.items():
+            rts, orphans = _equity_round_trips(evs)
+            for i, t in enumerate(rts):
                 rec = _build_stock(t, sym, i)
                 if rec:
                     stock_closed.append(rec)
+            for orph in orphans:
+                oid = _orphan_id(sym, orph)
+                n = seen_orphan_ids.get(oid, 0)
+                seen_orphan_ids[oid] = n + 1
+                if n:
+                    oid = f"{oid}#{n}"   # identical unmatched sale — keep ids distinct
+                entry = manual_basis.get(oid) or {}
+                cps = entry.get("costPerShare")
+                acq = entry.get("acquiredDate")
+                if cps is not None:
+                    # acquiredDate (when supplied) becomes the real open date, so
+                    # daysHeld and the short/long-term bucket come out correct;
+                    # without it the holding period is unknown → defaults short.
+                    t = {"side": orph["side"], "qty": orph["qty"],
+                         "open_price": float(cps), "close_price": orph["close_price"],
+                         "open_time": acq or "", "close_time": orph["close_time"]}
+                    rec = _build_stock(t, sym, oid)
+                    if rec:
+                        rec["manualBasis"] = True
+                        stock_closed.append(rec)
+                # Surface for completion when it still lacks a cost basis OR an
+                # acquired date (needed to classify short- vs long-term). Carry the
+                # known cost so the app pre-fills it.
+                if cps is None or not acq:
+                    unresolved.append({
+                        "id": oid, "symbol": sym, "side": orph["side"],
+                        "shares": _round(orph["qty"], 4),
+                        "soldAt": _round(orph.get("close_price") or 0.0, 4),
+                        "closeDate": (orph.get("close_time") or "")[:10],
+                        "costPerShare": _round(float(cps), 4) if cps is not None else None,
+                        "acquiredDate": acq or None,
+                    })
+
+        # Stamp everything this account produced with its id — the same opaque hash
+        # the snapshot uses for the account — so the app can reconcile realized P&L
+        # against a broker report one account at a time. Schwab's reports are per
+        # account; an unstamped record can only be compared in aggregate.
+        for lst, start in zip(_outputs, _marks):
+            for rec in lst[start:]:
+                rec["accountId"] = aid
+
+    # Fully user-added stock sales (predate the feed entirely, so they never show up
+    # as orphans). Each is a closed long round-trip with a real acquired/sold date.
+    for i, s in enumerate(manual_sales or []):
+        try:
+            t = {"side": "long", "qty": float(s["shares"]),
+                 "open_price": float(s["costPerShare"]), "close_price": float(s["proceedsPerShare"]),
+                 "open_time": s.get("acquiredDate") or "", "close_time": s.get("soldDate") or ""}
+        except (KeyError, TypeError, ValueError):
+            continue
+        rec = _build_stock(t, str(s.get("symbol", "")).upper(), f"manual-{i}")
+        if rec:
+            rec["manualBasis"] = True
+            rec["manualEntry"] = True
+            stock_closed.append(rec)
 
     for lst in (csp_closed, leap_closed, spread_closed, covered_closed, stock_closed):
         lst.sort(key=lambda r: r["closedAt"], reverse=True)
-    return {"csp": csp_closed, "leap": leap_closed, "spread": spread_closed, "covered": covered_closed, "stock": stock_closed}
+    return {"csp": csp_closed, "leap": leap_closed, "spread": spread_closed, "covered": covered_closed,
+            "stock": stock_closed, "_unresolved": unresolved}
 
 
 def _load_txns(data_dir: str) -> dict[str, list[dict[str, Any]]]:
@@ -593,22 +1053,63 @@ def _load_txns(data_dir: str) -> dict[str, list[dict[str, Any]]]:
         return {}
 
 
+def _load_manual_basis(data_dir: str) -> dict[str, dict[str, Any]]:
+    """User-entered basis for stock sales whose purchase predates the feed, keyed by
+    orphan id. Written by the app to manual_cost_basis.json. Accepts a bare number
+    ({id: costPerShare}) or an object ({id: {"costPerShare": x, "acquiredDate": iso}}).
+    acquiredDate (when present) sets the real holding period so the sale can be
+    classified short- vs long-term. Returns {id: {"costPerShare": float,
+    "acquiredDate": str|None}}."""
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        with open(os.path.join(data_dir, MANUAL_BASIS_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return out
+    if not isinstance(data, dict):
+        return out
+    for k, v in data.items():
+        if isinstance(v, dict):
+            cps = v.get("costPerShare")
+            acq = v.get("acquiredDate")
+        else:
+            cps, acq = v, None
+        if isinstance(cps, (int, float)):
+            out[k] = {"costPerShare": float(cps), "acquiredDate": acq if isinstance(acq, str) and acq else None}
+    return out
+
+
+def _load_manual_sales(data_dir: str) -> list[dict[str, Any]]:
+    """Fully user-added closed stock sales (predate the feed), written by the app to
+    manual_stock_sales.json as a list of
+    {symbol, shares, proceedsPerShare, costPerShare, acquiredDate, soldDate}."""
+    try:
+        with open(os.path.join(data_dir, MANUAL_SALES_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
 def write_closed(data_dir: str, store: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
     txns_store = _load_txns(data_dir)
-    closed = build_from_history(store, txns_store)
+    manual_basis = _load_manual_basis(data_dir)
+    manual_sales = _load_manual_sales(data_dir)
+    closed = build_from_history(store, txns_store, manual_basis, manual_sales)
     now = datetime.now(timezone.utc).isoformat()
     note = "Options reconstructed from order history (FIFO); stocks from the transactions feed incl. assignment cost basis. Spreads are same-underlying/type/expiration verticals."
 
-    def dump(filename: str, items: list) -> None:
+    def dump(filename: str, key: str, wrapper: str = "closed") -> None:
         with open(os.path.join(data_dir, filename), "w", encoding="utf-8") as f:
-            json.dump({"meta": {"generatedAt": now, "source": SOURCE_LABEL, "note": note}, "closed": items}, f, indent=2)
+            json.dump({"meta": {"generatedAt": now, "source": SOURCE_LABEL, "note": note}, wrapper: closed[key]}, f, indent=2)
 
-    dump(CSP_FILE, closed["csp"])
-    dump(LEAPS_FILE, closed["leap"])
-    dump(SPREADS_FILE, closed["spread"])
-    dump(COVERED_FILE, closed["covered"])
-    dump(STOCKS_FILE, closed["stock"])
-    return {k: len(v) for k, v in closed.items()}
+    dump(CSP_FILE, "csp")
+    dump(LEAPS_FILE, "leap")
+    dump(SPREADS_FILE, "spread")
+    dump(COVERED_FILE, "covered")
+    dump(STOCKS_FILE, "stock")
+    dump(UNRESOLVED_FILE, "_unresolved", wrapper="unresolved")
+    return {k: len(v) for k, v in closed.items() if not k.startswith("_")}
 
 
 def main() -> None:

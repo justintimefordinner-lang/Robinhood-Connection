@@ -162,6 +162,47 @@ def main() -> int:
     manual_positions.main()
     check("instrument ids are looked up once", FakeOptions.lookups == lookups, f"{lookups} -> {FakeOptions.lookups}")
 
+    print("closed trades (Robinhood-shaped history)")
+    import closed_trades
+
+    def opt_order(oid: str, when: str, instruction: str, price: float) -> dict:
+        # The record robinhood_orders.get_option_order_records builds: the leg's
+        # "symbol" is Robinhood's instrument UUID, not an OCC string.
+        return {"orderId": oid, "enteredTime": when, "fillPrice": price, "symbol": "SOFI", "legs": [{
+            "instruction": instruction, "positionEffect": "OPENING" if instruction.endswith("OPEN") else "CLOSING",
+            "quantity": 1, "assetType": "OPTION", "symbol": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "fillPrice": price,
+            "ticker": "SOFI", "putCall": "PUT", "strike": 16.0, "expiration": "2026-08-21"}]}
+
+    def stock_txn(oid: str, when: str, symbol: str, signed_qty: float, price: float) -> dict:
+        # The record robinhood_orders.get_stock_transactions builds.
+        return {"type": "TRADE", "tradeDate": when, "orderId": oid, "transferItems": [
+            {"instrument": {"assetType": "EQUITY", "symbol": symbol}, "amount": signed_qty, "price": price}]}
+
+    store = {"rh-1234": [opt_order("o-1", "2026-07-01T14:00:00Z", "SELL_TO_OPEN", 0.69),
+                         opt_order("o-2", "2026-07-20T14:00:00Z", "BUY_TO_CLOSE", 0.20)]}
+    txns = {"rh-1234": [stock_txn("s-1", "2026-06-01T14:00:00Z", "HOOD", 10, 100.0),
+                        stock_txn("s-2", "2026-07-01T14:00:00Z", "HOOD", -10, 110.0),
+                        # shares that arrived by assignment: Robinhood shows only the sale
+                        stock_txn("s-3", "2026-08-01T14:00:00Z", "AA", -100, 52.0)]}
+    out = closed_trades.build_from_history(store, txns)
+    check("put round-trip: one CSP", len(out["csp"]) == 1, str(len(out["csp"])))
+    check("CSP realized = (0.69 - 0.20) x 100", bool(out["csp"]) and abs(out["csp"][0]["realizedPnl"] - 49.0) < 0.01,
+          str(out["csp"][0]["realizedPnl"]) if out["csp"] else "none")
+    check("stock round-trip: +$100", [r["realizedPnl"] for r in out["stock"]] == [100.0], str([r["realizedPnl"] for r in out["stock"]]))
+    unresolved = out["_unresolved"]
+    check("sale with no purchase asks for a cost basis", len(unresolved) == 1 and unresolved[0]["symbol"] == "AA", json.dumps(unresolved))
+    if unresolved:
+        basis = {unresolved[0]["id"]: {"costPerShare": 49.0, "acquiredDate": "2026-07-18"}}
+        out2 = closed_trades.build_from_history(store, txns, basis)
+        aa = [r for r in out2["stock"] if r["symbol"] == "AA"]
+        check("entered cost basis books the sale", len(aa) == 1 and abs(aa[0]["realizedPnl"] - 300.0) < 0.01 and not out2["_unresolved"],
+              json.dumps(aa))
+    with open(os.path.join(data_dir, closed_trades.TXNS_FILE), "w", encoding="utf-8") as f:
+        json.dump(txns, f)
+    counts = closed_trades.write_closed(data_dir, store)
+    check("write_closed counts + unresolved file", counts.get("csp") == 1 and "_unresolved" not in counts
+          and os.path.exists(os.path.join(data_dir, closed_trades.UNRESOLVED_FILE)), json.dumps(counts))
+
     rc.get_client = real_get_client
     print()
     if FAILED:
