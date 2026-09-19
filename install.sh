@@ -94,6 +94,34 @@ Then run this again."
 Then run this again."
     fi
 
+    # The two checks above only know the default names. Units get renamed, and a
+    # bridge can be started from cron or by hand, so also look for what actually
+    # matters: anything still running out of the old checkout.
+    local OLD_PROCS SRC_REAL UNITS
+    SRC_REAL="$(cd "$SRC" && pwd -P)"
+    OLD_PROCS="$(pgrep -af -- "$SRC_REAL/" 2>/dev/null | grep -v "install.sh" || true)"
+    if [ -z "$OLD_PROCS" ]; then
+      # `npm run start` shows no path in its command line; find it by working directory.
+      for p in $(pgrep -u "$(id -u)" -f 'auto_push.py|next-server|npm run start|next start' 2>/dev/null || true); do
+        case "$(readlink "/proc/$p/cwd" 2>/dev/null || true)" in
+          "$SRC_REAL"|"$SRC_REAL"/*) OLD_PROCS="$OLD_PROCS
+$p $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)" ;;
+        esac
+      done
+    fi
+    if [ -n "$OLD_PROCS" ]; then
+      # Name the systemd units that own them, when there are any, so the fix is copy-paste.
+      UNITS="$(for p in $(printf '%s\n' "$OLD_PROCS" | awk 'NF{print $1}'); do
+                 sed -n 's|.*/\([^/]*\.service\)$|\1|p' "/proc/$p/cgroup" 2>/dev/null || true
+               done | sort -u | tr '\n' ' ')"
+      die "The old install is still running out of $SRC_REAL:
+$OLD_PROCS
+
+$( [ -n "${UNITS// /}" ] && printf 'Stop it (and any timers that go with it — see: systemctl list-units --all | grep -i robinhood):\n\n      sudo systemctl disable --now %s\n' "$UNITS" \
+                        || printf 'Stop those processes, and whatever starts them at boot (cron, rc.local, tmux).\n' )
+Then run this again."
+    fi
+
     # The saved session + login guard state. -n: never overwrite a newer one.
     if [ -d "$HOME/.tokens" ]; then
       cp -n "$HOME/.tokens/robinhood.pickle"            bridge-state/.tokens/ 2>/dev/null || true
