@@ -70,3 +70,44 @@ services:
 # No port is published for the bridge, and none is needed: a Robinhood login is
 # approved from the Robinhood app on your phone (or an authenticator key), so
 # nothing ever listens.
+
+  # Applies updates requested from Settings → "Update now". A stock Docker CLI
+  # with the host's Docker socket, so it can pull and recreate THIS project's
+  # containers; it is told the project name and never touches anything else.
+  # It has to run as root for the socket, which is the same trust as any Docker
+  # management tool. It does nothing until the dashboard drops
+  # data/update-request, and reports back through data/update-status.json.
+  updater:
+    image: docker:28-cli
+    restart: unless-stopped
+    environment:
+      COMPOSE_PROJECT_NAME: portfolio-robinhood
+    # The install folder at the SAME path as on the host, so the compose file's
+    # relative mounts (./data, ./bridge-state) resolve to the host folders when
+    # compose runs from inside this container. install.sh writes STACK_DIR.
+    working_dir: ${STACK_DIR:-/stack}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${STACK_DIR:-/stack}:${STACK_DIR:-/stack}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        marker=data/update-request; status=data/update-status.json
+        report() { printf '{"status":"%s","message":%s,"updatedAt":"%s"}\n' "$$1" "$$2" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$$status.tmp" && mv "$$status.tmp" "$$status"; }
+        echo "updater: watching $$(pwd)/$$marker"
+        while true; do
+          if [ -f "$$marker" ]; then
+            rm -f "$$marker"
+            echo "updater: update requested"
+            report running null
+            if out=$$(docker compose pull 2>&1) && out2=$$(docker compose up -d --remove-orphans 2>&1); then
+              report done null
+              echo "updater: done"
+            else
+              msg=$$(printf '%s\n%s' "$$out" "$$out2" | tail -n 3 | tr -d '"\' | tr '\n' ' ')
+              report error "\"$$msg\""
+              echo "updater: FAILED: $$msg"
+            fi
+          fi
+          sleep 10
+        done

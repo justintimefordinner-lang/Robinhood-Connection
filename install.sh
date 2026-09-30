@@ -156,6 +156,10 @@ Then run this again."
   # ── settings ────────────────────────────────────────────────────────────
   if [ -f .env ]; then
     say "Keeping your existing .env"
+    grep -q "^STACK_DIR=" .env || printf "
+# Where this stack lives (the updater mounts it at the same path).
+STACK_DIR=%s
+" "$DIR" >> .env
   else
     say "Writing settings (.env)"
     # Fall back sensibly on machines where these aren't available.
@@ -182,6 +186,10 @@ DASHBOARD_PORT=3001
 # Tracks the newest build. To pin to a specific release instead, use the
 # version number WITHOUT the leading v — for example IMAGE_TAG=2.0.0
 IMAGE_TAG=latest
+
+# Where this stack lives. The updater container mounts it at the same path so
+# "Update now" in Settings can run compose for this project.
+STACK_DIR=$DIR
 ENV
   fi
 

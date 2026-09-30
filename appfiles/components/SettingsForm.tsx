@@ -10,6 +10,7 @@ import { LayoutToggle } from "@/components/LayoutToggle";
 import { ManualPositions } from "@/components/ManualPositions";
 import type { ManualAccount } from "@/lib/manual-positions";
 import { CombineViews, type CombineAccountOption } from "@/components/CombineViews";
+import { UpdateCard } from "@/components/UpdateCard";
 
 function MenuItem({
   title,
@@ -232,6 +233,7 @@ export function SettingsForm({
   const multi = bridges.length > 1;
   return (
     <div className="space-y-3">
+      <UpdateCard />
       {bridges.map((b, i) => (
         <MenuItem
           key={b.id}

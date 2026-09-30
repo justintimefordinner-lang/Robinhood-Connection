@@ -70,6 +70,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}

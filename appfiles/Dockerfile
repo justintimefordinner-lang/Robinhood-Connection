@@ -53,6 +53,11 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
+# The commit this image was built from, so the running app can tell whether a
+# newer build has been published (Settings -> Update). Empty on a local build.
+ARG BUILD_SHA=""
+ENV BUILD_SHA=$BUILD_SHA
+
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static     ./.next/static
 COPY --from=build /app/public           ./public
