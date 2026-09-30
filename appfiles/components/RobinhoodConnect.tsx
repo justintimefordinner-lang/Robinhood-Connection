@@ -139,7 +139,12 @@ export function RobinhoodConnect({ bridge = "primary" }: { bridge?: string }) {
   const s = status.authStatus;
   const needsSetup = !status.configured || s === "needs_setup";
   const connecting = s === "connecting";
-  const connected = s === "connected";
+  // The bridge rewrites this status every minute it runs. When it goes quiet, a
+  // "connected" written days ago is history, not news: the process is hung or
+  // the container is down, and nothing is refreshing.
+  const ageMin = status.updatedAt ? (now - new Date(status.updatedAt).getTime()) / 60_000 : null;
+  const stale = ageMin != null && ageMin > 10;
+  const connected = s === "connected" && !stale;
   const showForm = needsSetup || editing;
   const timeLocked = !!status.lockedUntil && new Date(status.lockedUntil).getTime() > now;
 
@@ -160,10 +165,18 @@ export function RobinhoodConnect({ bridge = "primary" }: { bridge?: string }) {
               ? "Signing in… approve the prompt on your phone if one appears. This can take a couple of minutes."
               : needsSetup
                 ? "Not set up yet — add your Robinhood sign-in."
-                : "Not connected — reconnect to resume live data."}
+                : stale
+                  ? "Not reporting — the bridge has stopped."
+                  : "Not connected — reconnect to resume live data."}
         </span>
       </div>
 
+      {stale && (
+        <p className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-300 ring-1 ring-inset ring-rose-500/30">
+          The bridge hasn&apos;t reported in {ageMin! < 120 ? `${Math.round(ageMin!)} minutes` : ageMin! < 2880 ? `${Math.round(ageMin! / 60)} hours` : `${Math.round(ageMin! / 1440)} days`}, so nothing is refreshing. It restarts itself when a
+          cycle stalls; if this stays red, restart it by hand: <code className="text-[10px]">docker compose restart bridge</code> in the install folder.
+        </p>
+      )}
       {status.lastAttemptAt && (
         <p className="text-[11px] text-muted">
           Last login attempt: <span className="text-text">{relativeTime(status.lastAttemptAt, now)}</span>{" "}

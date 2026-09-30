@@ -43,6 +43,8 @@ Read-only throughout - this never places or cancels an order.
 from __future__ import annotations
 
 import os
+import socket
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -51,6 +53,30 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TICK_SECONDS = 5
+# No single request may hang the loop. robin_stocks makes its HTTP calls with no
+# timeout, so a connection that silently dies mid-request would otherwise wait
+# forever - the loop stops, the container looks healthy, and the data goes stale.
+socket.setdefaulttimeout(int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "90")))
+# Second line of defence: if a whole tick takes longer than this, the process
+# exits and Docker (restart: unless-stopped) brings it back with a clean slate.
+WATCHDOG_SECONDS = int(os.environ.get("WATCHDOG_SECONDS", "1800"))
+_heartbeat = time.time()
+
+
+def _beat() -> None:
+    global _heartbeat
+    _heartbeat = time.time()
+
+
+def _watchdog() -> None:
+    while True:
+        time.sleep(30)
+        stuck = time.time() - _heartbeat
+        if stuck > WATCHDOG_SECONDS:
+            print(f"auto_push: no progress for {stuck:.0f}s - exiting so the container restarts", flush=True)
+            os._exit(3)
+
+
 SLOW_RETRY_SECONDS = 900  # a failed once-a-day job tries again in 15 minutes
 
 
@@ -100,6 +126,7 @@ def _run(label: str, fn) -> tuple[float, object, str, str | None]:
     import login_guard
 
     start = time.time()
+    _beat()  # a long target (a first history sync) is progress, not a hang
     result = None
     outcome = "error"
     message = None
@@ -323,8 +350,11 @@ def main() -> None:
         + ", ".join(f"{t[0]} every {t[2]}s" for t in targets)
         + ". Press Ctrl+C to stop."
     )
+    threading.Thread(target=_watchdog, name="watchdog", daemon=True).start()
+    _last_status = time.time()
     try:
         while True:
+            _beat()
             # Dashboard requests first. Each is one os.path.exists when idle.
             if reauth is not None:
                 try:
@@ -367,6 +397,14 @@ def main() -> None:
                             reauth.note_result(outcome)
                         except Exception as exc:  # noqa: BLE001
                             _log(f"reauth: ERROR - {exc}")
+            # Keep the status file fresh even when the snapshot interval is long, so the
+            # dashboard can tell a quiet bridge from a hung one by the file's age alone.
+            if reauth is not None and time.time() - _last_status > 60:
+                _last_status = time.time()
+                try:
+                    reauth.publish_status()
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"reauth: ERROR - {exc}")
             time.sleep(TICK_SECONDS)
     except KeyboardInterrupt:
         _log("Stopped.")
