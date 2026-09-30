@@ -156,10 +156,7 @@ Then run this again."
   # ── settings ────────────────────────────────────────────────────────────
   if [ -f .env ]; then
     say "Keeping your existing .env"
-    grep -q "^STACK_DIR=" .env || printf "
-# Where this stack lives (the updater mounts it at the same path).
-STACK_DIR=%s
-" "$DIR" >> .env
+    grep -q "^STACK_DIR=" .env || printf '\n# Where this stack lives (the updater mounts it at the same path).\nSTACK_DIR=%s\n' "$DIR" >> .env
   else
     say "Writing settings (.env)"
     # Fall back sensibly on machines where these aren't available.
