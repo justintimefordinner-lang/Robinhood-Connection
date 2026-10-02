@@ -17,7 +17,8 @@ export interface Spread {
   shortStrike: number;
   longStrike: number;
   width: number; // strike distance, per share
-  netCredit: number; // per share at entry (positive ⇒ credit spread)
+  netCredit: number; // per share at entry (positive ⇒ credit spread, negative ⇒ debit paid)
+  isCredit: boolean;
   netMark: number; // per share now — cost to close the spread
   maxProfit: number; // total $ (the credit kept if it expires worthless)
   maxLoss: number; // total $ — capital at risk
@@ -38,18 +39,27 @@ function makeSpread(s: OptionPosition, l: OptionPosition): Spread {
   const qty = Math.min(s.qty, l.qty) || s.qty;
   const isPut = s.optionType === "put";
   const width = Math.abs(s.strike - l.strike);
-  const netCredit = s.entryPerShare - l.entryPerShare; // short collected − long paid
-  const netMark = s.mark - l.mark; // current cost to buy the spread back
-  const maxProfit = netCredit * 100 * qty;
-  const maxLoss = Math.max(width - netCredit, 0) * 100 * qty;
+  const netCredit = s.entryPerShare - l.entryPerShare; // short collected − long paid; negative ⇒ a debit spread
+  const netMark = s.mark - l.mark; // current cost to buy the spread back (negative ⇒ what it would sell for)
+  const isCredit = netCredit >= 0;
+  // A credit spread risks the width less the credit and can make the credit; a
+  // debit spread risks the debit paid and can make the width less the debit.
+  // (Treating every spread as a credit spread overstated a debit spread's risk by
+  // width + debit and showed a negative max profit.)
+  const maxProfit = (isCredit ? netCredit : width + netCredit) * 100 * qty;
+  const maxLoss = (isCredit ? Math.max(width - netCredit, 0) : -netCredit) * 100 * qty;
   const pnl = optionPnl(s) + optionPnl(l);
   const pnlPct = maxProfit !== 0 ? pnl / Math.abs(maxProfit) : 0;
   const dte = daysToExpiry(s.expiration);
-  const breakeven = isPut ? s.strike - netCredit : s.strike + netCredit;
+  // Credit: the short strike less/plus the credit. Debit: the long strike less/plus the debit.
+  const breakeven = isCredit ? (isPut ? s.strike - netCredit : s.strike + netCredit) : isPut ? l.strike + netCredit : l.strike - netCredit;
   const up = s.underlyingPrice ?? l.underlyingPrice;
   const toStrike = up && up > 0 ? (isPut ? (up - s.strike) / up : (s.strike - up) / up) : null;
   const collateral = maxLoss;
-  const remainingYield = collateral > 0 ? (netMark * 100 * qty) / collateral : 0;
+  // What is still on the table, as a share of the risk: a credit spread's remaining
+  // value to decay; a debit spread's max profit not yet earned.
+  const remainingValue = isCredit ? netMark * 100 * qty : maxProfit - pnl;
+  const remainingYield = collateral > 0 ? remainingValue / collateral : 0;
   const yr = remainingYield * (360 / Math.max(dte, 1));
   return {
     id: `${s.id}|${l.id}`,
@@ -63,6 +73,7 @@ function makeSpread(s: OptionPosition, l: OptionPosition): Spread {
     longStrike: l.strike,
     width,
     netCredit,
+    isCredit,
     netMark,
     maxProfit,
     maxLoss,

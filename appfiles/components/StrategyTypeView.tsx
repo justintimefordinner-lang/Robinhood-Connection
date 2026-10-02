@@ -172,7 +172,7 @@ export function StrategyTypeView({
         ) : (
           <>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <Stat label="Net credit" value={<Amt>{fmtMoney(sCredit)}</Amt>} sub={`${effectiveSpreads.length} spread${effectiveSpreads.length === 1 ? "" : "s"}`} />
+              <Stat label="Max profit" value={<Amt>{fmtMoney(sCredit)}</Amt>} sub={`${effectiveSpreads.length} spread${effectiveSpreads.length === 1 ? "" : "s"}`} />
               <Stat label="Gain/Loss" value={<SimValue oldV={sPnlReal} newV={sPnl} signed />} sub="unrealized" />
               <Stat label="Risk" value={<Amt>{fmtMoney(sRisk)}</Amt>} sub="max loss" />
               <Stat
