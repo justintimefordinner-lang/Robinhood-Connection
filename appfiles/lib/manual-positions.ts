@@ -101,6 +101,23 @@ export function upsertAccount(input: { id?: string; label: string; cash: number 
   return acct;
 }
 
+/** Create-or-update under a fixed id (an import that must land in the same account every time). */
+export function ensureAccount(id: string, label: string, cash: number): ManualAccount {
+  const doc = readManualFile();
+  const now = new Date().toISOString();
+  let acct = doc.accounts.find((a) => a.id === id);
+  if (acct) {
+    acct.label = label;
+    acct.cash = cash;
+    acct.updatedAt = now;
+  } else {
+    acct = { id, label, cash, positions: [], updatedAt: now };
+    doc.accounts.push(acct);
+  }
+  writeManualFile(doc);
+  return acct;
+}
+
 /** Set an account's cash balance (from a form edit or an import's cash row). */
 export function setAccountCash(id: string, cash: number): ManualAccount | null {
   const doc = readManualFile();
@@ -170,7 +187,7 @@ export function closePosition(accountId: string, positionId: string, input: Clos
 
   if (pos.type === "stock") {
     const shares = input.shares && input.shares > 0 ? Math.min(input.shares, pos.qty) : pos.qty;
-    const rec = closed.closeStock(pos, shares, input, acct.label);
+    const rec = closed.closeStock(pos, shares, input, acct.label, acct.id);
     booked = `${shares} ${pos.symbol} sold @ ${input.closePrice}: ${rec.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec.realizedPnl)}`;
     if (shares < pos.qty) {
       remove.delete(pos.id);
@@ -184,11 +201,11 @@ export function closePosition(accountId: string, positionId: string, input: Clos
     if (partner && input.closeSpreadTogether && input.netClosePerShare != null) {
       const shortLeg = pos.side === "short" ? pos : partner;
       const longLeg = pos.side === "short" ? partner : pos;
-      const rec = closed.closeSpread(shortLeg, longLeg, input.netClosePerShare, input, acct.label);
+      const rec = closed.closeSpread(shortLeg, longLeg, input.netClosePerShare, input, acct.label, acct.id);
       remove.add(partner.id);
       booked = `${pos.symbol} ${shortLeg.strike}/${longLeg.strike} spread: ${rec.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec.realizedPnl)}`;
     } else if (pos.side === "short" && pos.optionType === "put") {
-      const rec = closed.closeCsp(pos, input, acct.label);
+      const rec = closed.closeCsp(pos, input, acct.label, acct.id);
       booked = rec.outcome === "assigned" ? `${pos.symbol} put assigned — premium folded into the shares' basis` : `${pos.symbol} put: ${rec.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec.realizedPnl)}`;
       if (input.assigned) {
         // Take delivery: 100 shares per contract at the strike, basis net of the premium.
@@ -203,7 +220,7 @@ export function closePosition(accountId: string, positionId: string, input: Clos
         booked += `; ${100 * pos.qty} shares added @ ${(pos.strike - pos.premium).toFixed(2)}`;
       }
     } else if (pos.side === "short") {
-      const rec = closed.closeCoveredCall(pos, input, acct.label);
+      const rec = closed.closeCoveredCall(pos, input, acct.label, acct.id);
       booked = `${pos.symbol} call: ${rec.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec.realizedPnl)}`;
       if (input.assigned) {
         // Called away: the covering shares leave at the strike, booked as a stock sale.
@@ -212,7 +229,7 @@ export function closePosition(accountId: string, positionId: string, input: Clos
           if (toSell <= 0) break;
           if (s.type !== "stock" || s.symbol !== pos.symbol || s.qty <= 0) continue;
           const n = Math.min(s.qty, toSell);
-          const rec2 = closed.closeStock(s, n, { closePrice: pos.strike, closedAt: input.closedAt }, acct.label);
+          const rec2 = closed.closeStock(s, n, { closePrice: pos.strike, closedAt: input.closedAt }, acct.label, acct.id);
           booked += `; ${n} shares called away @ ${pos.strike}: ${rec2.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec2.realizedPnl)}`;
           s.qty -= n;
           if (s.qty === 0) remove.add(s.id);
@@ -220,7 +237,7 @@ export function closePosition(accountId: string, positionId: string, input: Clos
         }
       }
     } else {
-      const rec = closed.closeLongOption(pos, input, acct.label);
+      const rec = closed.closeLongOption(pos, input, acct.label, acct.id);
       booked = `${pos.symbol} ${pos.optionType}: ${rec.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(rec.realizedPnl)}`;
     }
   }

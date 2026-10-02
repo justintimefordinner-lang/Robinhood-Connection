@@ -29,6 +29,7 @@ export function UpdateCard() {
   const [message, setMessage] = useState("");
   const [checking, setChecking] = useState(false);
   const startedAt = useRef(0);
+  const restartingSince = useRef(0);
 
   const load = useCallback(async (force = false) => {
     setChecking(true);
@@ -65,17 +66,28 @@ export function UpdateCard() {
             return;
           }
           if (s.status === "running") setPhase("running");
-          if (s.status === "done") setPhase("restarting");
+          if (s.status === "done") {
+            restartingSince.current = Date.now();
+            setPhase("restarting");
+          }
           return;
         }
         const c = (await (await fetch("/api/update/check", { cache: "no-store" })).json()) as Check;
         if (check && c.current && c.current !== check.current) {
           setPhase("done");
           setTimeout(() => window.location.reload(), 1500);
+        } else if (c.current && Date.now() - restartingSince.current > 30_000) {
+          // Pulled and restarted, same build answering: nothing newer was published.
+          setPhase("done");
+          setMessage("Restarted on the same build; nothing newer was published.");
+          setTimeout(() => window.location.reload(), 2500);
         }
       } catch {
         // the dashboard container is being replaced; keep polling
-        if (phase !== "restarting") setPhase("restarting");
+        if (phase !== "restarting") {
+          restartingSince.current = Date.now();
+          setPhase("restarting");
+        }
       }
     }, 3000);
     return () => clearInterval(id);
@@ -99,12 +111,15 @@ export function UpdateCard() {
 
   const busy = phase === "requested" || phase === "running" || phase === "restarting";
   const when = check.publishedAt ? new Date(check.publishedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : null;
+  // Applying never needs GitHub (the updater just pulls the images), so when the
+  // check itself failed the button stays, as "Pull latest anyway".
+  const canApply = check.available || !!check.error;
 
   return (
     <div className={`rounded-2xl border px-4 py-3 ${check.available ? "border-sky-500/40 bg-sky-500/10" : "border-border bg-surface"}`}>
       <div className="flex items-center justify-between gap-3">
         <span>
-          <span className="block text-sm font-semibold">{check.available ? "Update available" : "Up to date"}</span>
+          <span className="block text-sm font-semibold">{check.available ? "Update available" : check.error ? "Couldn't check" : "Up to date"}</span>
           <span className="mt-0.5 block text-xs text-muted">
             Running build {check.current}
             {check.available && check.latest ? ` · ${check.latest} published${when ? ` ${when}` : ""}` : ""}
@@ -126,16 +141,22 @@ export function UpdateCard() {
         </ul>
       )}
 
-      {check.available && (
+      {canApply && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button onClick={apply} disabled={busy || phase === "done"} className={btn}>
-            {phase === "idle" || phase === "error" ? "Update now" : phase === "requested" ? "Requested…" : phase === "running" ? "Pulling images…" : phase === "restarting" ? "Restarting…" : "Updated"}
+            {phase === "idle" || phase === "error" ? (check.available ? "Update now" : "Pull latest anyway") : phase === "requested" ? "Requested…" : phase === "running" ? "Pulling images…" : phase === "restarting" ? "Restarting…" : "Updated"}
           </button>
-          {phase === "idle" && <span className="text-[11px] text-muted">Pulls the new images and restarts both containers. About a minute; the page reloads by itself.</span>}
+          {phase === "idle" && (
+            <span className="text-[11px] text-muted">
+              {check.available
+                ? "Pulls the new images and restarts both containers. About a minute; the page reloads by itself."
+                : "Pulls whatever is newest and restarts; harmless if nothing changed."}
+            </span>
+          )}
           {phase === "requested" && <span className="text-[11px] text-muted">Waiting for the updater to pick it up (it looks every 10 seconds).</span>}
           {phase === "running" && <span className="text-[11px] text-muted">Downloading. Data keeps flowing until the switch.</span>}
           {phase === "restarting" && <span className="text-[11px] text-muted">Containers are being replaced; this page will reload.</span>}
-          {phase === "done" && <span className="text-[11px] text-emerald-400">Done. Reloading…</span>}
+          {phase === "done" && <span className="text-[11px] text-emerald-400">{message || "Done. Reloading…"}</span>}
           {phase === "error" && <span className="text-[11px] text-rose-400">{message}</span>}
         </div>
       )}

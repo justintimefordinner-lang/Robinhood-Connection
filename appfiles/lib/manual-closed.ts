@@ -56,7 +56,7 @@ export interface CloseInput {
 }
 
 /** Short put → csp-closed.json. */
-export function closeCsp(o: ManualOption, input: CloseInput, accountLabel: string): ClosedCSP {
+export function closeCsp(o: ManualOption, input: CloseInput, accountLabel: string, accountId?: string): ClosedCSP {
   const credit = o.premium * 100 * o.qty;
   const cost = input.closePrice * 100 * o.qty;
   const fees = input.fees ?? 0;
@@ -74,6 +74,7 @@ export function closeCsp(o: ManualOption, input: CloseInput, accountLabel: strin
     id: `manual:${o.id}`,
     symbol: o.symbol,
     name: `${o.symbol} · ${accountLabel}`,
+    accountId,
     strike: o.strike,
     expiration: o.expiration,
     openedAt: o.openedAt ?? input.closedAt,
@@ -94,7 +95,7 @@ export function closeCsp(o: ManualOption, input: CloseInput, accountLabel: strin
 }
 
 /** Short call → covered-closed.json (covered or not; return is on notional either way). */
-export function closeCoveredCall(o: ManualOption, input: CloseInput, accountLabel: string): ClosedCoveredCall {
+export function closeCoveredCall(o: ManualOption, input: CloseInput, accountLabel: string, accountId?: string): ClosedCoveredCall {
   const credit = o.premium * 100 * o.qty;
   const cost = input.assigned ? 0 : input.closePrice * 100 * o.qty;
   const fees = input.fees ?? 0;
@@ -106,6 +107,7 @@ export function closeCoveredCall(o: ManualOption, input: CloseInput, accountLabe
     id: `manual:${o.id}`,
     symbol: o.symbol,
     name: `${o.symbol} · ${accountLabel}`,
+    accountId,
     strike: o.strike,
     expiration: o.expiration,
     openedAt: o.openedAt ?? input.closedAt,
@@ -125,7 +127,7 @@ export function closeCoveredCall(o: ManualOption, input: CloseInput, accountLabe
 }
 
 /** Any long option → leaps-closed.json (the file carries optionType). */
-export function closeLongOption(o: ManualOption, input: CloseInput, accountLabel: string): ClosedLeap {
+export function closeLongOption(o: ManualOption, input: CloseInput, accountLabel: string, accountId?: string): ClosedLeap {
   const costBasis = o.premium * 100 * o.qty;
   const proceeds = input.closePrice * 100 * o.qty;
   const fees = input.fees ?? 0;
@@ -136,6 +138,7 @@ export function closeLongOption(o: ManualOption, input: CloseInput, accountLabel
     id: `manual:${o.id}`,
     symbol: o.symbol,
     name: `${o.symbol} · ${accountLabel}`,
+    accountId,
     optionType: o.optionType,
     strike: o.strike,
     expiration: o.expiration,
@@ -156,7 +159,7 @@ export function closeLongOption(o: ManualOption, input: CloseInput, accountLabel
 }
 
 /** A vertical (short + long leg, same type and expiry) closed together at a net price. */
-export function closeSpread(shortLeg: ManualOption, longLeg: ManualOption, netClosePerShare: number, input: CloseInput, accountLabel: string): ClosedSpread {
+export function closeSpread(shortLeg: ManualOption, longLeg: ManualOption, netClosePerShare: number, input: CloseInput, accountLabel: string, accountId?: string): ClosedSpread {
   const contracts = Math.min(shortLeg.qty, longLeg.qty);
   const netOpenPerShare = shortLeg.premium - longLeg.premium; // + credit, − debit
   const netOpen = netOpenPerShare * 100 * contracts;
@@ -173,6 +176,7 @@ export function closeSpread(shortLeg: ManualOption, longLeg: ManualOption, netCl
     id: `manual:${shortLeg.id}+${longLeg.id}`,
     symbol: shortLeg.symbol,
     name: `${shortLeg.symbol} · ${accountLabel}`,
+    accountId,
     optionType: shortLeg.optionType,
     shortStrike: shortLeg.strike,
     longStrike: longLeg.strike,
@@ -197,7 +201,7 @@ export function closeSpread(shortLeg: ManualOption, longLeg: ManualOption, netCl
 }
 
 /** Shares sold (all or some) → stocks-closed.json. */
-export function closeStock(s: ManualStock, shares: number, input: CloseInput, accountLabel: string): ClosedStock {
+export function closeStock(s: ManualStock, shares: number, input: CloseInput, accountLabel: string, accountId?: string): ClosedStock {
   const costBasis = s.avgCost * shares;
   const proceeds = input.closePrice * shares;
   const fees = input.fees ?? 0;
@@ -208,6 +212,7 @@ export function closeStock(s: ManualStock, shares: number, input: CloseInput, ac
     id: `manual:${s.id}:${input.closedAt}`,
     symbol: s.symbol,
     name: `${s.symbol} · ${accountLabel}`,
+    accountId,
     side: "long",
     shares: r4(shares),
     avgOpen: r4(s.avgCost),

@@ -251,6 +251,35 @@ export function spreadRiskCapital(options: OptionPosition[]): number {
   }
   return total;
 }
+
+/** Cash a broker holds against the spreads, as distinct from the capital at risk
+ *  above. A CREDIT spread is secured by its full width (the credit is already in
+ *  the cash balance, so the whole width is what stands behind it). A DEBIT spread
+ *  needs nothing: the debit left the cash balance when it was paid, and the
+ *  position is carried at its mark like any other long. */
+export function spreadCashRequirement(options: OptionPosition[]): number {
+  const legs = options.filter((o) => o.kind === "put-spread" || o.kind === "call-spread");
+  const groups = new Map<string, OptionPosition[]>();
+  for (const o of legs) {
+    const k = `${o.symbol}|${o.optionType}|${o.expiration}`;
+    const g = groups.get(k);
+    if (g) g.push(o);
+    else groups.set(k, [o]);
+  }
+  let total = 0;
+  for (const group of groups.values()) {
+    const shorts = group.filter((o) => o.side === "short");
+    const longs = group.filter((o) => o.side === "long");
+    for (const s of shorts) {
+      const li = longs.findIndex((l) => l.strike !== s.strike);
+      if (li === -1) continue;
+      const [l] = longs.splice(li, 1);
+      if (s.entryPerShare - l.entryPerShare < 0) continue; // debit spread: nothing held
+      total += Math.abs(s.strike - l.strike) * MULT * Math.min(s.qty, l.qty);
+    }
+  }
+  return total;
+}
 /**
  * Genuine uncommitted ("free") cash — the single source of truth for the Cash
  * allocation slice AND the VIX reserve math, so the two always agree.
@@ -270,16 +299,22 @@ export function freeCashValue(
   equities: Equity[],
   options: OptionPosition[],
 ): number {
-  const leapCalls = options.filter((o) => o.kind === "leap-call").reduce((s, o) => s + optionMarketValue(o), 0);
-  const hedge = options.filter((o) => o.kind === "leap-put-hedge").reduce((s, o) => s + optionMarketValue(o), 0);
-  const cspColl = cspCollateralTotal(options);
-  const spread = spreadRiskCapital(options);
+  // The broker's total (liquidation value) already carries every option at its mark:
+  // long ones add to it, short ones take off what they would cost to buy back.
+  // Back all of that out, plus shares and crypto, and what is left is the cash
+  // balance. Then take off the collateral and spread risk that cash stands
+  // behind. Subtracting collateral from a total that already deducted the puts'
+  // buy-back value counted the short book twice, and read tens of thousands low.
+  const optionsNet = options.reduce((s, o) => s + optionNetValue(o), 0);
+  const cash = summary.totalValue - summary.equityValue - summary.cryptoValue - optionsNet;
+  // Money-market sweep funds report as holdings but spend like cash.
   const moneyMarket = equities
     .filter((e) => isCashEquivalent(e.symbol))
     .reduce((s, e) => s + equityValue(e), 0);
-  const deployed = summary.equityValue + leapCalls + hedge + cspColl + spread + summary.cryptoValue;
-  const remainder = Math.max(0, summary.totalValue - deployed);
-  return remainder + moneyMarket;
+  // Collateral the way the broker holds it: full strike for cash-secured puts,
+  // full width for credit spreads, nothing for debit spreads.
+  const committed = cspCollateralTotal(options) + spreadCashRequirement(options);
+  return Math.max(0, cash + moneyMarket - committed);
 }
 
 /**
