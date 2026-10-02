@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountTag } from "@/components/AccountTag";
 // Expandable option row for the Options overview list. Collapsed: symbol/strike,
 // exp/DTE/Δ, value, P/L. Tapped open: the full detail — CSPs mirror the CSP-tab
 // cards; LEAPs/hedges get the parallel long-option breakdown (incl. long-term-
@@ -219,7 +220,7 @@ export function OptionRow({ o, real, sim, costBasis }: { o: OptionPosition; real
     <div>
       <button onClick={toggle} className={`${LEAP_COLS} w-full px-3 py-2.5 text-left text-[11px] active:bg-surface-2`}>
         <div className="min-w-0">
-          <div className="truncate font-semibold">{o.symbol}</div>
+          <div className="flex items-center truncate font-semibold">{o.symbol}<AccountTag label={o.account} index={o.accountIndex} /></div>
           <div className="truncate text-[10px] text-muted">${o.strike}{o.optionType === "put" ? "P" : "C"} · ×{o.qty}</div>
         </div>
         <span className="tabular text-right">{dte}</span>

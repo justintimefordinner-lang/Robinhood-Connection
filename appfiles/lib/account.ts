@@ -8,7 +8,7 @@
 // getSelectedAccount, so none of them need to know about it.
 import { cookies } from "next/headers";
 import type { Account, AccountData, Snapshot } from "./types";
-import { ACCOUNT_COOKIE, COMBINE_COOKIE, COMBINED_ID, combinedAccount, parseCombineIds } from "./account-shared";
+import { ACCOUNT_COOKIE, COMBINE_COOKIE, COMBINED_ID, accountLabel, combinedAccount, parseCombineIds } from "./account-shared";
 import { combineAccountData } from "./combine";
 
 export { ACCOUNT_COOKIE, COMBINE_COOKIE, COMBINED_ID, accountLabel } from "./account-shared";
@@ -37,7 +37,10 @@ export async function getSelectedAccount(
     return {
       id: COMBINED_ID,
       account: combinedAccount(members),
-      data: combineAccountData(members.map((a) => snap.data[a.id])),
+      data: combineAccountData(
+        members.map((a) => snap.data[a.id]),
+        members.map((a) => accountLabel(a)),
+      ),
     };
   }
   const account = snap.accounts.find((a) => a.id === id) ?? snap.accounts[0];

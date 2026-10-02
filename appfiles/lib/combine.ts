@@ -49,6 +49,7 @@ function mergeEquities(parts: Equity[][]): Equity[] {
       cur.bbSigma = cur.bbSigma ?? e.bbSigma;
       cur.priceHistory = cur.priceHistory ?? e.priceHistory;
       cur.dayChange = cur.dayChange ?? e.dayChange;
+      if (e.account && cur.account && !cur.account.split(" + ").includes(e.account)) cur.account = `${cur.account} + ${e.account}`;
     }
   }
   return [...bySymbol.values()].map((row) => {
@@ -94,12 +95,16 @@ function mergeHistory(parts: ValuePoint[][]): ValuePoint[] {
   });
 }
 
-export function combineAccountData(parts: AccountData[]): AccountData {
+export function combineAccountData(parts: AccountData[], labels: string[] = []): AccountData {
   const crypto = parts.flatMap((p) => p.crypto ?? []) as CryptoHolding[];
+  // Each position remembers which account it came from, so the merged view can
+  // say so on the row. Shares of one symbol held in two accounts merge into one
+  // row that names both.
+  const tag = <T extends { account?: string }>(xs: T[], i: number): T[] => (labels[i] ? xs.map((x) => ({ ...x, account: labels[i], accountIndex: i }) as T) : xs);
   return {
     summary: sumSummaries(parts.map((p) => p.summary)),
-    equities: mergeEquities(parts.map((p) => p.equities)),
-    options: mergeOptions(parts.map((p) => p.options)),
+    equities: mergeEquities(parts.map((p, i) => tag(p.equities, i))),
+    options: mergeOptions(parts.map((p, i) => tag(p.options, i))),
     valueHistory: mergeHistory(parts.map((p) => p.valueHistory ?? [])),
     ...(crypto.length > 0 ? { crypto } : {}),
   };
