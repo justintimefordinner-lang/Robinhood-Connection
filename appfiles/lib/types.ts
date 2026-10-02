@@ -109,6 +109,8 @@ export interface OptionPosition {
   chanceOfProfitShort?: number; // 0..1, for short positions
   openedAt?: string; // ISO date the position was opened (held positions only)
   erDate?: string | null; // next earnings date (ISO) for the underlying, if known
+  account?: string; // Combined View only: the account this position came from (its label)
+  accountIndex?: number; // Combined View only: the account's position in the combined set, which picks its marker colour
 }
 
 export interface ValuePoint {

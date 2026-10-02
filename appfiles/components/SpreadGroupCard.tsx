@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountTag } from "@/components/AccountTag";
 // One open-spreads group: a sortable table of complete verticals (legs combined)
 // plus a credit ledger. Mirrors the CSP table — collateral becomes the spread's
 // capital at risk, and Yr% is the annualized return on the remaining spread value
