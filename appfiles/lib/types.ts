@@ -31,6 +31,8 @@ export interface Equity {
   qty: number;
   avgCost: number; // average cost per share
   price: number; // latest close per share
+  account?: string; // Combined View only: the account(s) these shares sit in (label; "A + B" when merged)
+  accountIndex?: number; // Combined View only: the account's position in the combined set, which picks its marker colour
   dayChange?: number | null; // per-share $ move today (vs prior close), for Top Movers
   coveredCalls?: CoveredCallQuote[]; // ~30Δ call premiums at 1–4 week tenors (holdings ≥100 sh)
   bbSigma?: number | null; // current price's σ from its 20-day mean (−2 = lower band)

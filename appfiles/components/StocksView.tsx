@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountTag } from "@/components/AccountTag";
 // Stocks view with a pinned Open|Closed toggle (default Open). Open shows a summary
 // plus a sortable column table of holdings (qty, avg cost, value, P/L $ and %) — tap
 // a header to sort, tap a row to expand into last price, cost basis, today's move,
@@ -191,6 +192,7 @@ export function StocksView({ equities, closed, initialStatus = "open", statusFro
                         <span className={`flex items-center gap-1 truncate font-semibold ${ccOpportunity ? "text-emerald-300" : ""}`}>
                           <span className="text-[9px] text-muted">{isOpen ? "▾" : "▸"}</span>
                           {e.symbol}
+                          <AccountTag label={e.account} index={e.accountIndex} />
                           {ccOpportunity && (
                             <span
                               title="A covered call above your cost basis is available and none is written yet"

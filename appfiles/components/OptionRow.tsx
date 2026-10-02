@@ -156,6 +156,7 @@ export function OptionRow({ o, real, sim, costBasis }: { o: OptionPosition; real
           <div className="min-w-0">
             <div className="flex items-center gap-1">
               <span className={`truncate font-semibold ${CSP_RISK_TEXT[cspRiskBand(o)]}`}>{o.symbol}</span>
+              <AccountTag label={o.account} index={o.accountIndex} />
               {(() => {
                 const er = cspEarningsFlag(o.expiration, o.erDate);
                 return er ? (
